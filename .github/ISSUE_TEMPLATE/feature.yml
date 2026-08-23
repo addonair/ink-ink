@@ -1,0 +1,48 @@
+name: Feature request
+description: Suggest something new.
+title: '[feature] '
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check `docs/spec.md` first. Several things are **deliberately**
+        out of scope for the MVP — mobile, Firefox/Safari, handwriting
+        recognition, ink persistence, and the referencing flow (US-7). Arguing
+        one of those back in is welcome; just say why the tradeoff changed.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the friction, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+    validations:
+      required: true
+
+  - type: dropdown
+    id: spec-status
+    attributes:
+      label: Is this in the spec?
+      options:
+        - New — not covered by docs/spec.md
+        - Already specified, just not built yet
+        - Explicitly deferred in spec section 7, and I think that should change
+        - Explicitly out of scope in spec section 3, and I think that should change
+    validations:
+      required: true
+
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy impact
+      description: >
+        NFR-5 says stroke data and page content never leave the browser, and the
+        extension requests only the `storage` permission. Would this change
+        either? A yes is not a no — it just needs to be deliberate.

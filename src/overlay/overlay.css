@@ -1,0 +1,65 @@
+/**
+ * Overlay styles.
+ *
+ * NFR-11: these are injected into a shadow root, never the host document, so
+ * nothing here can affect host page rendering. Keep it that way — a stray
+ * selector in the light DOM is how an extension breaks someone's site.
+ *
+ * SCAFFOLD: structural rules only.
+ */
+
+:host {
+  all: initial;
+  font-family: system-ui, sans-serif;
+}
+
+.ink-root {
+  position: absolute;
+  inset: 0;
+  /* FR-3: the layer intercepts nothing until it is explicitly enabled. */
+  pointer-events: none;
+  z-index: 2147483000;
+}
+
+.ink-root[data-enabled='true'] .ink-canvas {
+  pointer-events: auto;
+  /* FR-6 / US-8: the browser keeps handling touch, so finger-scroll survives. */
+  touch-action: pan-x pan-y;
+}
+
+.ink-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* NFR-12: mode is visible at all times, without covering content. */
+.ink-toggle {
+  position: fixed;
+  right: 1rem;
+  bottom: 6rem;
+  pointer-events: auto;
+}
+
+/* NFR-13: dismissible, and never blocking the conversation. */
+.ink-review-panel {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+.ink-review-panel[hidden] {
+  display: none;
+}
+
+/* FR-13 / FR-20: an unresolved mark must look different from a resolved one. */
+.ink-mark[data-state='resolved'] {
+  --ink-stroke: #2563eb;
+}
+
+.ink-mark[data-state='unresolved'] {
+  --ink-stroke: #dc2626;
+}

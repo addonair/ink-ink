@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ink-ink settings</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 40rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+      }
+      textarea {
+        width: 100%;
+        min-height: 5rem;
+        font: inherit;
+        padding: 0.5rem;
+      }
+      .hint {
+        color: #555;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ink-ink</h1>
+
+    <section>
+      <label for="trailing-instruction">Trailing instruction</label>
+      <p class="hint">
+        Appended after your answers when the message is composed. See spec section 5.6.
+      </p>
+      <textarea id="trailing-instruction"></textarea>
+      <p id="status" class="hint" role="status"></p>
+    </section>
+
+    <section>
+      <h2>Privacy</h2>
+      <p class="hint">
+        Strokes and page content never leave your browser. This extension makes no network requests,
+        and requests only the <code>storage</code> permission &mdash; used solely for the setting
+        above.
+      </p>
+    </section>
+
+    <script type="module" src="./options.ts"></script>
+  </body>
+</html>

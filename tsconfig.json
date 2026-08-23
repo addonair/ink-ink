@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["chrome", "vite/client"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+
+    "noEmit": true,
+    // Lets vite.config.ts import './manifest.config.ts' with its extension,
+    // which Vite's native config loader requires. Safe under noEmit.
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+
+    // No `baseUrl`: deprecated in TS 6 and removed in 7. `paths` resolves
+    // relative to this file, which is what we want anyway.
+    "paths": {
+      "@core/*": ["./src/core/*"],
+      "@adapters/*": ["./src/adapters/*"],
+      "@overlay/*": ["./src/overlay/*"],
+      "@state/*": ["./src/state/*"],
+      "@compose/*": ["./src/compose/*"]
+    }
+  },
+  "include": ["src", "manifest.config.ts", "vite.config.ts", "vitest.config.ts"]
+}

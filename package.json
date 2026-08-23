@@ -1,0 +1,43 @@
+{
+  "name": "ink-ink",
+  "version": "0.0.1",
+  "description": "Mark up an AI chat response with a stylus; the marks resolve into text sent back to the model.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "Emmanuel Addo",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/addonair/ink-ink.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "zip": "npm run build && node scripts/zip.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "validate": "python .claude/skills/living-codebase/scripts/validate_state.py --stale-days 90",
+    "icons": "python scripts/make_icons.py"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.7.1",
+    "@eslint/js": "^10.0.1",
+    "@types/chrome": "^0.2.7",
+    "@types/node": "^22.15.0",
+    "eslint": "^10.9.0",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.9.6",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
+  }
+}

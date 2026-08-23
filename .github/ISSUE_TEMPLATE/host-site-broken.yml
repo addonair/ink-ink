@@ -1,0 +1,57 @@
+name: Host site markup changed
+description: The extension stopped recognising questions, options, or the composer on a supported site.
+title: '[broken] '
+labels: ['host-breakage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Spec section 8 calls host-markup breakage "a question of when, not if".
+        This template exists so those reports are easy to spot and fast to fix.
+
+        The repair is normally confined to one adapter file under `src/adapters/`.
+
+  - type: input
+    id: site
+    attributes:
+      label: Site
+      placeholder: chat.deepseek.com
+    validations:
+      required: true
+
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What stopped working?
+      options:
+        - Ink draws, but nothing ever resolves (every mark shows as unresolved)
+        - Options resolve to the wrong line
+        - The toggle never appears
+        - Answers are composed but not inserted into the composer
+        - Ink drifts away from the content when scrolling
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample question block
+      description: >
+        Paste the assistant text that failed to parse. Option formatting matters
+        a lot here — "A)" vs "A." vs "(A)" vs a numbered list are handled
+        separately.
+      render: text
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Anything prefixed with `[ink-ink]` from the page console.
+      render: text
+
+  - type: input
+    id: version
+    attributes:
+      label: Extension version
+      placeholder: '0.0.1'

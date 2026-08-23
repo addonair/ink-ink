@@ -1,0 +1,12 @@
+# Normalise line endings to LF everywhere, including in Windows working trees.
+#
+# Prettier is configured with `endOfLine: "lf"`. Without this file, a clone on
+# Windows (core.autocrlf=true) checks out CRLF and `npm run format:check` fails
+# locally while passing on Ubuntu CI — a confusing mismatch to debug.
+* text=auto eol=lf
+
+# Binary: never touch these.
+*.png binary
+*.zip binary
+*.woff binary
+*.woff2 binary

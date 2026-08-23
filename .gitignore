@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.zip
+
+# Tool caches
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+
+# Python bytecode (the living-codebase scripts)
+__pycache__/
+*.pyc

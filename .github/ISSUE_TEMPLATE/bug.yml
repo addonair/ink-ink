@@ -1,0 +1,63 @@
+name: Bug report
+description: Something behaves incorrectly.
+title: '[bug] '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If the extension stopped recognising a supported chat site, please use
+        the **Host site markup changed** template instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a chat with a generated MCQ set
+        2. Toggle ink on
+        3. Circle option B on question 2
+        4. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: input-device
+    attributes:
+      label: Input device
+      description: >
+        Spec section 8 flags that not every stylus reports
+        `pointerType === 'pen'`. If drawing does not work at all, this is the
+        first thing to check.
+      options:
+        - Stylus / active pen
+        - Finger (touch)
+        - Mouse / trackpad
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: Chrome 140 on Windows 11
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      render: text

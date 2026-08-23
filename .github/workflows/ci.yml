@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify manifest permissions stayed minimal
+        # NFR-5/6/7 are enforced by the permission list staying short. A silent
+        # widening is exactly the change a reviewer would skim past, so it
+        # fails the build instead.
+        run: |
+          node -e '
+            const m = require("./dist/manifest.json");
+            const allowed = ["storage"];
+            const extra = (m.permissions ?? []).filter((p) => !allowed.includes(p));
+            if (extra.length) {
+              console.error("Unexpected permissions:", extra);
+              console.error("Widening permissions needs a decision record under .claude/decisions/.");
+              process.exit(1);
+            }
+            if (m.host_permissions?.length) {
+              console.error("host_permissions must stay empty (NFR-6):", m.host_permissions);
+              process.exit(1);
+            }
+            console.log("Permissions OK:", m.permissions);
+          '
+
+  living-codebase-state:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate learned state
+        # Flags rules whose evidence has not been re-checked in 90 days.
+        # A living rule set has to be allowed to go stale visibly.
+        run: python .claude/skills/living-codebase/scripts/validate_state.py --stale-days 90
