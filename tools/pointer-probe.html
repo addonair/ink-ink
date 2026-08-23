@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>Pointer probe — ink-ink</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        height: 100dvh;
+        background: #fafafa;
+        color: #111;
+      }
+      header {
+        padding: 0.75rem 1rem;
+        background: #fff;
+        border-bottom: 1px solid #ddd;
+      }
+      h1 {
+        font-size: 1rem;
+        margin: 0 0 0.25rem;
+      }
+      p {
+        margin: 0;
+        font-size: 0.85rem;
+        color: #555;
+      }
+      #pad {
+        margin: 1rem;
+        border: 2px dashed #bbb;
+        border-radius: 8px;
+        background: #fff;
+        touch-action: none;
+        position: relative;
+      }
+      canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      #verdict {
+        padding: 0.75rem 1rem;
+        font-size: 0.9rem;
+        background: #fff;
+        border-top: 1px solid #ddd;
+        max-height: 42vh;
+        overflow: auto;
+      }
+      .row {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-bottom: 0.5rem;
+      }
+      .chip {
+        padding: 0.15rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        background: #eee;
+      }
+      .chip.pen {
+        background: #dbeafe;
+        color: #1e40af;
+      }
+      .chip.touch {
+        background: #fef3c7;
+        color: #92400e;
+      }
+      .chip.mouse {
+        background: #e5e7eb;
+        color: #374151;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.8rem;
+      }
+      td,
+      th {
+        text-align: left;
+        padding: 0.2rem 0.4rem;
+        border-bottom: 1px solid #eee;
+      }
+      th {
+        color: #666;
+        font-weight: 600;
+      }
+      code {
+        background: #f3f4f6;
+        padding: 0.05rem 0.25rem;
+        border-radius: 3px;
+      }
+      button {
+        font: inherit;
+        padding: 0.3rem 0.7rem;
+        border-radius: 6px;
+        border: 1px solid #bbb;
+        background: #fff;
+      }
+      .good {
+        color: #166534;
+        font-weight: 600;
+      }
+      .bad {
+        color: #991b1b;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Pointer probe</h1>
+      <p>
+        Draw in the box with your stylus, then with a finger, then with a mouse. This answers spec
+        &sect;8: does the pen actually report <code>pointerType === 'pen'</code>?
+      </p>
+    </header>
+
+    <div id="pad"><canvas id="c"></canvas></div>
+
+    <div id="verdict">
+      <div class="row" id="seen"><span class="chip">nothing seen yet</span></div>
+      <div class="row">
+        <button id="clear">Clear</button>
+        <button id="copy">Copy report</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>type</th>
+            <th>events</th>
+            <th>pressure</th>
+            <th>tiltX/Y</th>
+            <th>coalesced</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p id="conclusion" style="margin-top: 0.6rem"></p>
+    </div>
+
+    <script>
+      const pad = document.getElementById('pad');
+      const canvas = document.getElementById('c');
+      const ctx = canvas.getContext('2d');
+      const stats = new Map();
+      let drawing = false;
+
+      function resize() {
+        const r = pad.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = r.width * dpr;
+        canvas.height = r.height * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+      }
+      new ResizeObserver(resize).observe(pad);
+      resize();
+
+      const COLOURS = { pen: '#2563eb', touch: '#d97706', mouse: '#6b7280' };
+
+      function record(e, coalescedCount) {
+        const k = e.pointerType || 'unknown';
+        const s = stats.get(k) || {
+          n: 0,
+          pMin: Infinity,
+          pMax: -Infinity,
+          tilt: false,
+          coalesced: 0,
+        };
+        s.n++;
+        if (typeof e.pressure === 'number') {
+          s.pMin = Math.min(s.pMin, e.pressure);
+          s.pMax = Math.max(s.pMax, e.pressure);
+        }
+        if (e.tiltX || e.tiltY) s.tilt = true;
+        s.coalesced = Math.max(s.coalesced, coalescedCount || 1);
+        stats.set(k, s);
+        render();
+      }
+
+      function render() {
+        document.getElementById('seen').innerHTML =
+          [...stats.keys()].map((k) => `<span class="chip ${k}">${k}</span>`).join('') ||
+          '<span class="chip">nothing seen yet</span>';
+
+        document.getElementById('rows').innerHTML = [...stats.entries()]
+          .map(
+            ([k, s]) =>
+              `<tr><td><code>${k}</code></td><td>${s.n}</td><td>${
+                s.pMin === Infinity ? '—' : `${s.pMin.toFixed(2)}–${s.pMax.toFixed(2)}`
+              }</td><td>${s.tilt ? 'yes' : 'no'}</td><td>${s.coalesced}</td></tr>`,
+          )
+          .join('');
+
+        const c = document.getElementById('conclusion');
+        if (stats.has('pen')) {
+          c.innerHTML =
+            '<span class="good">Pen reports as <code>pen</code>.</span> FR-5/FR-6 hold as specified — pen draws, touch scrolls.';
+        } else if (stats.has('touch') && !stats.has('pen')) {
+          c.innerHTML =
+            '<span class="bad">No <code>pen</code> events seen.</span> If you drew with the stylus and it registered as <code>touch</code>, FR-6 needs rethinking — pen and finger cannot be separated by <code>pointerType</code> alone on this hardware. Pressure and tilt columns above may offer a fallback discriminator.';
+        } else {
+          c.textContent = 'Draw with the stylus to test.';
+        }
+      }
+
+      pad.addEventListener('pointerdown', (e) => {
+        drawing = true;
+        pad.setPointerCapture(e.pointerId);
+        ctx.strokeStyle = COLOURS[e.pointerType] || '#000';
+        ctx.beginPath();
+        const r = pad.getBoundingClientRect();
+        ctx.moveTo(e.clientX - r.left, e.clientY - r.top);
+        record(e, 1);
+      });
+
+      pad.addEventListener('pointermove', (e) => {
+        if (!drawing) return;
+        const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+        const r = pad.getBoundingClientRect();
+        for (const ev of events) {
+          ctx.lineWidth = 1 + (ev.pressure || 0.5) * 6;
+          ctx.lineTo(ev.clientX - r.left, ev.clientY - r.top);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(ev.clientX - r.left, ev.clientY - r.top);
+        }
+        record(e, events.length);
+      });
+
+      for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
+        pad.addEventListener(type, () => {
+          drawing = false;
+        });
+      }
+
+      document.getElementById('clear').addEventListener('click', () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        stats.clear();
+        render();
+      });
+
+      document.getElementById('copy').addEventListener('click', async () => {
+        const report = {
+          userAgent: navigator.userAgent,
+          maxTouchPoints: navigator.maxTouchPoints,
+          devicePixelRatio: window.devicePixelRatio,
+          pointerTypes: Object.fromEntries(stats),
+        };
+        await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+        document.getElementById('copy').textContent = 'Copied';
+        setTimeout(() => (document.getElementById('copy').textContent = 'Copy report'), 1500);
+      });
+
+      render();
+    </script>
+  </body>
+</html>

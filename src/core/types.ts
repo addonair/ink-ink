@@ -7,10 +7,20 @@
  * resolution logic works against a first-party quiz UI later.
  */
 
-/** A single sampled pointer position, in document coordinates (FR-9). */
-export interface Point {
+/**
+ * A bare position in document coordinates.
+ *
+ * Geometry works in `Vec2`, not `Point`: a computed position like a centroid
+ * has no meaningful timestamp, and requiring one would mean inventing a value.
+ * Every `Point` is a valid `Vec2`, so stroke data passes straight through.
+ */
+export interface Vec2 {
   x: number;
   y: number;
+}
+
+/** A single sampled pointer position, in document coordinates (FR-9). */
+export interface Point extends Vec2 {
   /** Milliseconds, from the same clock for every point in a stroke (FR-8). */
   t: number;
   /** 0..1 where the device reports it; undefined when it does not. */
@@ -55,7 +65,14 @@ export interface Target {
   questionId?: QuestionId;
   /** For `option`: the parsed label — "B" from "B) Paris". */
   label?: string;
-  /** For `question`: its 1-based position as displayed. */
+  /**
+   * 1-based position of the question, as displayed.
+   *
+   * Set on `question` targets for their own position, and on `option` targets
+   * for their *parent question's* position. Options need it because the
+   * composed message is numbered by question ("2. B"), and an option would
+   * otherwise have no route to that number (FR-26, spec section 5.6).
+   */
   ordinal?: number;
 }
 

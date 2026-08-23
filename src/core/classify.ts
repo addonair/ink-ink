@@ -5,11 +5,12 @@
  * pick different scoring strategies based on the answer, so the decision needs
  * to be inspectable and testable on its own.
  *
- * SCAFFOLD: thresholds below are placeholders. Spec section 8 lists threshold
- * tuning as an open question answerable only with real strokes; they are named
+ * The thresholds below are placeholders. Spec section 8 lists threshold tuning
+ * as an open question answerable only with real strokes; they are named
  * constants so tuning is a one-line change with a test to prove it.
  */
 
+import { endpointGap, pathLength, signedArea } from './geometry';
 import type { MarkKind, Stroke } from './types';
 
 /**
@@ -43,8 +44,25 @@ export const DEFAULT_THRESHOLDS: ClassifierThresholds = {
  * flagging instead of guessing starts here, not just at resolution.
  */
 export function classifyStroke(
-  _stroke: Stroke,
-  _thresholds: ClassifierThresholds = DEFAULT_THRESHOLDS,
+  stroke: Stroke,
+  thresholds: ClassifierThresholds = DEFAULT_THRESHOLDS,
 ): MarkKind {
-  throw new Error('Not implemented: classifyStroke');
+  const points = stroke.points;
+  if (points.length === 0) return 'unknown';
+
+  const length = pathLength(points);
+
+  // A tap or a short flick is a tick (FR-18 covers "tick or short mark").
+  // Checked before closure, because a tap trivially satisfies "endpoints are
+  // close together" without being a loop.
+  if (length < thresholds.minLoopPathLength) return 'tick';
+
+  const closed = endpointGap(points) <= thresholds.closureRatio * length;
+  const enclosed = Math.abs(signedArea(points));
+
+  if (closed && enclosed >= thresholds.minLoopArea) return 'circle';
+
+  // Long, open, or enclosing nothing meaningful: a squiggle, an underline, a
+  // stray hand rest. Say so rather than guessing.
+  return 'unknown';
 }

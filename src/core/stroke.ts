@@ -48,33 +48,74 @@ export function shouldCapture(kind: PointerKind, inkLayerEnabled: boolean): bool
 }
 
 /**
+ * Monotonic stroke ids.
+ *
+ * A counter rather than `crypto.randomUUID()`: ids only need to be unique
+ * within one page session, and deterministic ids keep tests readable.
+ */
+let nextStrokeSeq = 1;
+
+/** Test seam. Not used in production code. */
+export function __resetStrokeIds(): void {
+  nextStrokeSeq = 1;
+}
+
+const toPoint = (s: PointerSample): Point =>
+  s.pressure === undefined
+    ? { x: s.x, y: s.y, t: s.t }
+    : { x: s.x, y: s.y, t: s.t, pressure: s.pressure };
+
+/**
  * Accumulates samples for one pen-down..pen-up gesture.
  *
- * SCAFFOLD: method bodies unimplemented.
+ * Deliberately does NOT drop short strokes: a single tap is a legitimate tick
+ * (FR-18 covers "tick or short mark"). Judging whether a stroke means anything
+ * is `classifyStroke`'s job, not the recorder's — the recorder only reports
+ * what the pen did.
  */
 export class StrokeRecorder {
+  #id: StrokeId | null = null;
+  #points: Point[] = [];
+
   /** Begin a stroke. Returns the id assigned to it. */
-  begin(_sample: PointerSample): StrokeId {
-    throw new Error('Not implemented: StrokeRecorder.begin');
+  begin(sample: PointerSample): StrokeId {
+    const id = `stroke-${nextStrokeSeq++}` as StrokeId;
+    this.#id = id;
+    this.#points = [toPoint(sample)];
+    return id;
   }
 
   /** Append a sample. No-op when no stroke is open. */
-  extend(_sample: PointerSample): void {
-    throw new Error('Not implemented: StrokeRecorder.extend');
+  extend(sample: PointerSample): void {
+    if (this.#id === null) return;
+    this.#points.push(toPoint(sample));
   }
 
-  /** Close the stroke and return it, or null if it was too short to keep. */
-  end(_sample?: PointerSample): Stroke | null {
-    throw new Error('Not implemented: StrokeRecorder.end');
+  /** Close the stroke and return it, or null if no stroke was open. */
+  end(sample?: PointerSample): Stroke | null {
+    if (this.#id === null) return null;
+
+    if (sample !== undefined) this.#points.push(toPoint(sample));
+
+    const stroke: Stroke = { id: this.#id, points: this.#points };
+    this.#id = null;
+    this.#points = [];
+    return stroke;
   }
 
   /** Discard the in-progress stroke, e.g. on pointercancel. */
   abort(): void {
-    throw new Error('Not implemented: StrokeRecorder.abort');
+    this.#id = null;
+    this.#points = [];
+  }
+
+  /** Whether a stroke is currently open. */
+  get isRecording(): boolean {
+    return this.#id !== null;
   }
 
   /** Points captured so far, for live rendering during the gesture (NFR-1). */
   get current(): readonly Point[] {
-    throw new Error('Not implemented: StrokeRecorder.current');
+    return this.#points;
   }
 }
