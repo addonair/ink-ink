@@ -12,32 +12,52 @@
         margin: 0;
         font-family: system-ui, sans-serif;
         display: grid;
-        grid-template-rows: auto 1fr auto;
+        grid-template-rows: auto auto 1fr auto;
         height: 100dvh;
         background: #fafafa;
         color: #111;
       }
       header {
-        padding: 0.75rem 1rem;
+        padding: 0.6rem 1rem;
         background: #fff;
         border-bottom: 1px solid #ddd;
       }
       h1 {
         font-size: 1rem;
-        margin: 0 0 0.25rem;
+        margin: 0 0 0.2rem;
       }
       p {
         margin: 0;
         font-size: 0.85rem;
         color: #555;
       }
+      #live {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+        padding: 0.5rem 1rem;
+        background: #fff;
+        border-bottom: 1px solid #ddd;
+        font-size: 0.8rem;
+      }
+      .kv {
+        padding: 0.15rem 0.5rem;
+        border-radius: 4px;
+        background: #f3f4f6;
+        font-variant-numeric: tabular-nums;
+      }
+      .kv b {
+        font-weight: 600;
+        color: #374151;
+      }
       #pad {
-        margin: 1rem;
+        margin: 0.75rem 1rem;
         border: 2px dashed #bbb;
         border-radius: 8px;
         background: #fff;
         touch-action: none;
         position: relative;
+        min-height: 140px;
       }
       canvas {
         position: absolute;
@@ -46,11 +66,11 @@
         height: 100%;
       }
       #verdict {
-        padding: 0.75rem 1rem;
-        font-size: 0.9rem;
+        padding: 0.7rem 1rem;
+        font-size: 0.88rem;
         background: #fff;
         border-top: 1px solid #ddd;
-        max-height: 42vh;
+        max-height: 46vh;
         overflow: auto;
       }
       .row {
@@ -58,9 +78,10 @@
         gap: 0.5rem;
         flex-wrap: wrap;
         margin-bottom: 0.5rem;
+        align-items: center;
       }
       .chip {
-        padding: 0.15rem 0.5rem;
+        padding: 0.15rem 0.55rem;
         border-radius: 999px;
         font-size: 0.8rem;
         background: #eee;
@@ -112,16 +133,48 @@
         color: #991b1b;
         font-weight: 600;
       }
+      .warn {
+        color: #92400e;
+        font-weight: 600;
+      }
+      .panel {
+        margin-top: 0.6rem;
+        padding: 0.6rem 0.75rem;
+        border-radius: 6px;
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        font-size: 0.83rem;
+        line-height: 1.5;
+      }
+      .panel ol {
+        margin: 0.4rem 0 0;
+        padding-left: 1.1rem;
+      }
+      #env {
+        font-size: 0.75rem;
+        color: #6b7280;
+        margin-top: 0.5rem;
+        word-break: break-word;
+      }
     </style>
   </head>
   <body>
     <header>
       <h1>Pointer probe</h1>
       <p>
-        Draw in the box with your stylus, then with a finger, then with a mouse. This answers spec
-        &sect;8: does the pen actually report <code>pointerType === 'pen'</code>?
+        Draw in the box with the pen, then a finger, then a mouse. Answers spec &sect;8: does this
+        hardware report <code>pointerType === 'pen'</code>?
       </p>
     </header>
+
+    <div id="live">
+      <span class="kv"><b>type</b> <span id="l-type">—</span></span>
+      <span class="kv"><b>pressure</b> <span id="l-pressure">—</span></span>
+      <span class="kv"><b>tilt</b> <span id="l-tilt">—</span></span>
+      <span class="kv"><b>buttons</b> <span id="l-buttons">—</span></span>
+      <span class="kv"><b>coalesced</b> <span id="l-coalesced">—</span></span>
+      <span class="kv"><b>pointerId</b> <span id="l-id">—</span></span>
+    </div>
 
     <div id="pad"><canvas id="c"></canvas></div>
 
@@ -138,12 +191,13 @@
             <th>events</th>
             <th>pressure</th>
             <th>tiltX/Y</th>
-            <th>coalesced</th>
+            <th>max coalesced</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
       </table>
-      <p id="conclusion" style="margin-top: 0.6rem"></p>
+      <div id="conclusion"></div>
+      <div id="env"></div>
     </div>
 
     <script>
@@ -152,12 +206,13 @@
       const ctx = canvas.getContext('2d');
       const stats = new Map();
       let drawing = false;
+      let last = null;
 
       function resize() {
         const r = pad.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
-        canvas.width = r.width * dpr;
-        canvas.height = r.height * dpr;
+        canvas.width = Math.max(1, r.width * dpr);
+        canvas.height = Math.max(1, r.height * dpr);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -173,18 +228,33 @@
           n: 0,
           pMin: Infinity,
           pMax: -Infinity,
+          pDistinct: new Set(),
           tilt: false,
-          coalesced: 0,
+          coalesced: 1,
         };
         s.n++;
         if (typeof e.pressure === 'number') {
           s.pMin = Math.min(s.pMin, e.pressure);
           s.pMax = Math.max(s.pMax, e.pressure);
+          s.pDistinct.add(e.pressure.toFixed(3));
         }
         if (e.tiltX || e.tiltY) s.tilt = true;
         s.coalesced = Math.max(s.coalesced, coalescedCount || 1);
         stats.set(k, s);
+
+        last = e;
+        renderLive(e, coalescedCount);
         render();
+      }
+
+      function renderLive(e, coalescedCount) {
+        document.getElementById('l-type').textContent = e.pointerType || '—';
+        document.getElementById('l-pressure').textContent =
+          typeof e.pressure === 'number' ? e.pressure.toFixed(3) : '—';
+        document.getElementById('l-tilt').textContent = `${e.tiltX ?? 0}/${e.tiltY ?? 0}`;
+        document.getElementById('l-buttons').textContent = String(e.buttons);
+        document.getElementById('l-coalesced').textContent = String(coalescedCount || 1);
+        document.getElementById('l-id').textContent = String(e.pointerId);
       }
 
       function render() {
@@ -193,59 +263,155 @@
           '<span class="chip">nothing seen yet</span>';
 
         document.getElementById('rows').innerHTML = [...stats.entries()]
-          .map(
-            ([k, s]) =>
-              `<tr><td><code>${k}</code></td><td>${s.n}</td><td>${
-                s.pMin === Infinity ? '—' : `${s.pMin.toFixed(2)}–${s.pMax.toFixed(2)}`
-              }</td><td>${s.tilt ? 'yes' : 'no'}</td><td>${s.coalesced}</td></tr>`,
-          )
+          .map(([k, s]) => {
+            const pressure =
+              s.pMin === Infinity
+                ? '—'
+                : `${s.pMin.toFixed(3)}–${s.pMax.toFixed(3)} (${s.pDistinct.size} distinct)`;
+            return `<tr><td><code>${k}</code></td><td>${s.n}</td><td>${pressure}</td><td>${
+              s.tilt ? 'yes' : 'no'
+            }</td><td>${s.coalesced}</td></tr>`;
+          })
           .join('');
 
-        const c = document.getElementById('conclusion');
-        if (stats.has('pen')) {
-          c.innerHTML =
-            '<span class="good">Pen reports as <code>pen</code>.</span> FR-5/FR-6 hold as specified — pen draws, touch scrolls.';
-        } else if (stats.has('touch') && !stats.has('pen')) {
-          c.innerHTML =
-            '<span class="bad">No <code>pen</code> events seen.</span> If you drew with the stylus and it registered as <code>touch</code>, FR-6 needs rethinking — pen and finger cannot be separated by <code>pointerType</code> alone on this hardware. Pressure and tilt columns above may offer a fallback discriminator.';
-        } else {
-          c.textContent = 'Draw with the stylus to test.';
-        }
+        document.getElementById('conclusion').innerHTML = conclude();
       }
+
+      /**
+       * A pen tablet whose driver has Windows Ink disabled presents as a plain
+       * HID mouse: pointerType 'mouse', zero tilt, one coalesced sample, and a
+       * pressure value pinned to a single constant. That signature is worth
+       * naming explicitly, because it looks identical to "the hardware cannot
+       * do this" while actually being a one-checkbox fix.
+       */
+      function looksLikeInkDisabledTablet() {
+        const m = stats.get('mouse');
+        if (!m || stats.has('pen')) return false;
+        return !m.tilt && m.coalesced <= 1 && m.pDistinct.size <= 1;
+      }
+
+      function conclude() {
+        if (stats.size === 0) return 'Draw in the box above to test.';
+
+        if (stats.has('pen')) {
+          const p = stats.get('pen');
+          const varying = p.pDistinct.size > 3;
+          return `<span class="good">Pen reports as <code>pen</code>.</span> FR-5 holds as written.${
+            varying
+              ? ' Pressure varies, so the digitizer is fully active.'
+              : ' <span class="warn">Pressure looks constant</span> — the pen path is active but pressure may not be.'
+          }`;
+        }
+
+        if (looksLikeInkDisabledTablet()) {
+          return `
+            <span class="warn">Every event arrived as <code>mouse</code>, with no tilt, no
+            coalescing, and a single constant pressure value.</span>
+            <div class="panel">
+              That is the signature of a pen tablet whose driver is presenting the pen as an
+              ordinary mouse, rather than of hardware that cannot report pen input. Most pen
+              tablets (Wacom, Huion, XP-Pen, Gaomon and similar) ship a driver control panel with a
+              <b>Windows Ink</b> toggle; with it off, the browser never sees a pen.
+              <ol>
+                <li>Open the tablet's own driver / settings application (not Windows Settings).</li>
+                <li>Look for <b>Windows Ink</b>, <b>Pen mode</b>, or <b>Pressure / Digital Ink</b>
+                    — usually under a Pen, Stylus, or Advanced tab.</li>
+                <li>Enable Windows Ink, and set the pen to <b>Pen mode</b> rather than Mouse mode.</li>
+                <li>Reload this page and draw again.</li>
+              </ol>
+              If <code>pen</code> still never appears after that, the reading is real and FR-6 needs
+              a fallback discriminator rather than <code>pointerType</code>.
+            </div>`;
+        }
+
+        if (stats.has('touch') && !stats.has('pen')) {
+          return `<span class="bad">The stylus registered as <code>touch</code>, not
+            <code>pen</code>.</span> FR-6 cannot separate pen from finger by
+            <code>pointerType</code> on this hardware — the pressure and tilt columns above are the
+            place to look for a fallback discriminator.`;
+        }
+
+        return `<span class="warn">No <code>pen</code> events seen yet.</span> If you have only
+          tried a mouse or trackpad so far, that reading is expected — try the pen itself.`;
+      }
+
+      function renderEnv() {
+        const inFrame = window.self !== window.top;
+        const bits = [
+          `maxTouchPoints: ${navigator.maxTouchPoints}`,
+          `any-pointer:fine: ${matchMedia('(any-pointer: fine)').matches}`,
+          `any-hover: ${matchMedia('(any-hover: hover)').matches}`,
+          `dpr: ${window.devicePixelRatio}`,
+          `embedded: ${inFrame ? 'yes — open in a real browser window instead' : 'no'}`,
+        ];
+        document.getElementById('env').textContent = bits.join('  ·  ');
+      }
+
+      // --- drawing -----------------------------------------------------------
+      // One path per stroke, stroked once per frame. The earlier version stroked
+      // every segment separately, so overlapping antialiased caps accumulated and
+      // slow movement looked darker than fast movement — an artifact that read as
+      // pressure data when there was none.
+      let path = [];
+
+      function redraw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (const seg of strokes) drawSegment(seg);
+        if (path.length) drawSegment({ type: last?.pointerType, pts: path });
+      }
+
+      const strokes = [];
+
+      function drawSegment(seg) {
+        if (seg.pts.length < 2) return;
+        ctx.strokeStyle = COLOURS[seg.type] || '#000';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(seg.pts[0].x, seg.pts[0].y);
+        for (let i = 1; i < seg.pts.length; i++) ctx.lineTo(seg.pts[i].x, seg.pts[i].y);
+        ctx.stroke();
+      }
+
+      const toLocal = (ev) => {
+        const r = pad.getBoundingClientRect();
+        return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+      };
 
       pad.addEventListener('pointerdown', (e) => {
         drawing = true;
         pad.setPointerCapture(e.pointerId);
-        ctx.strokeStyle = COLOURS[e.pointerType] || '#000';
-        ctx.beginPath();
-        const r = pad.getBoundingClientRect();
-        ctx.moveTo(e.clientX - r.left, e.clientY - r.top);
+        path = [toLocal(e)];
         record(e, 1);
+        redraw();
       });
 
       pad.addEventListener('pointermove', (e) => {
-        if (!drawing) return;
-        const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-        const r = pad.getBoundingClientRect();
-        for (const ev of events) {
-          ctx.lineWidth = 1 + (ev.pressure || 0.5) * 6;
-          ctx.lineTo(ev.clientX - r.left, ev.clientY - r.top);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(ev.clientX - r.left, ev.clientY - r.top);
+        // Report hover movement too — a pen reports pointerType while hovering,
+        // before it ever touches the surface.
+        if (!drawing) {
+          renderLive(e, 1);
+          return;
         }
+        const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+        for (const ev of events) path.push(toLocal(ev));
         record(e, events.length);
+        redraw();
       });
 
       for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
         pad.addEventListener(type, () => {
+          if (drawing && path.length > 1) strokes.push({ type: last?.pointerType, pts: path });
           drawing = false;
+          path = [];
+          redraw();
         });
       }
 
       document.getElementById('clear').addEventListener('click', () => {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        strokes.length = 0;
+        path = [];
         stats.clear();
+        redraw();
         render();
       });
 
@@ -254,13 +420,38 @@
           userAgent: navigator.userAgent,
           maxTouchPoints: navigator.maxTouchPoints,
           devicePixelRatio: window.devicePixelRatio,
-          pointerTypes: Object.fromEntries(stats),
+          embedded: window.self !== window.top,
+          anyPointerFine: matchMedia('(any-pointer: fine)').matches,
+          pointerTypes: Object.fromEntries(
+            [...stats.entries()].map(([k, s]) => [
+              k,
+              {
+                events: s.n,
+                pressureMin: s.pMin === Infinity ? null : s.pMin,
+                pressureMax: s.pMax === -Infinity ? null : s.pMax,
+                distinctPressureValues: s.pDistinct.size,
+                reportsTilt: s.tilt,
+                maxCoalesced: s.coalesced,
+              },
+            ]),
+          ),
         };
-        await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
-        document.getElementById('copy').textContent = 'Copied';
-        setTimeout(() => (document.getElementById('copy').textContent = 'Copy report'), 1500);
+        const text = JSON.stringify(report, null, 2);
+        try {
+          await navigator.clipboard.writeText(text);
+          document.getElementById('copy').textContent = 'Copied';
+        } catch {
+          // Clipboard is blocked on file:// in some browsers; show it instead.
+          document.getElementById('env').textContent = text;
+          document.getElementById('copy').textContent = 'Shown below';
+        }
+        setTimeout(() => {
+          document.getElementById('copy').textContent = 'Copy report';
+          renderEnv();
+        }, 2000);
       });
 
+      renderEnv();
       render();
     </script>
   </body>
