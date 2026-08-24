@@ -31,8 +31,31 @@
   z-index: 2147483000;
   /* FR-3: the layer intercepts nothing until it is explicitly enabled. */
   pointer-events: none;
-  /* FR-6 / US-8: the browser keeps handling touch, so finger-scroll survives. */
-  touch-action: pan-x pan-y;
+
+  /*
+   * `none`, not `pan-x pan-y`.
+   *
+   * Allowing pan lets the browser reinterpret a slow or long pen stroke as a
+   * scroll gesture: it claims the pointer, fires `pointercancel`, and scrolls
+   * the page underneath the ink. In practice the stroke stops dead partway
+   * through and vanishes. A drawing surface has to own its gestures outright.
+   *
+   * This only applies while the layer is enabled — when it is off,
+   * `pointer-events: none` makes the canvas transparent to input and normal
+   * scrolling is unaffected (FR-3).
+   *
+   * Tradeoff against US-8, which wants finger-scroll while the pen is active:
+   * with the layer on, touch over the canvas no longer scrolls the page. The
+   * target hardware reports `maxTouchPoints: 0` and has no touch input at all
+   * (see .claude/knowledge/target-hardware.md), so nothing is lost there. If
+   * this is ever run on a real touchscreen, US-8 needs revisiting — but a pen
+   * that cannot draw is the worse failure by a wide margin.
+   */
+  touch-action: none;
+
+  /* Stop pen drags from turning into text selection on the page beneath. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* NFR-12: mode is visible at all times, without covering content. */

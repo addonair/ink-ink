@@ -136,6 +136,39 @@ describe('InkSession', () => {
     expect(toggle().disabled).toBe(false);
   });
 
+  it('keeps a stroke whose pointer the browser cancelled mid-gesture', () => {
+    // Regression: pointercancel used to abort the stroke, so ink stopped dead
+    // and vanished partway through a line whenever the browser reinterpreted
+    // the pen movement as a scroll gesture.
+    session = new InkSession({ adapter: fixtureAdapter });
+    toggle().click();
+
+    const canvas = shadowOf().querySelector<HTMLCanvasElement>('.ink-canvas');
+    if (canvas === null) throw new Error('no canvas');
+
+    const send = (type: string, x: number, y: number): void => {
+      canvas.dispatchEvent(
+        new PointerEvent(type, {
+          pointerType: 'pen',
+          pointerId: 3,
+          isPrimary: true,
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+        }),
+      );
+    };
+
+    send('pointerdown', 100, 100);
+    send('pointermove', 140, 100);
+    send('pointermove', 140, 140);
+    send('pointercancel', 140, 140);
+
+    // The stroke survived and became a mark, resolved or not.
+    expect(session.markCount).toBe(1);
+  });
+
   it('submit() does nothing when no marks are resolved', () => {
     session = new InkSession({ adapter: fixtureAdapter });
 

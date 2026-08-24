@@ -101,6 +101,11 @@ export class InkSession {
     this.#checkHealth();
   }
 
+  /** Number of marks currently held, resolved or not. */
+  get markCount(): number {
+    return this.#marks.size;
+  }
+
   /** The composed text, exactly as `submit()` would insert it. */
   previewText(): string {
     return composeAnswerMessage(this.#marks.resolved(), {
@@ -193,22 +198,29 @@ export class InkSession {
       this.#canvas.drawLive(this.#recorder.current);
     });
 
-    const finish = (event: PointerEvent, keep: boolean): void => {
+    const finish = (event: PointerEvent, appendFinalPoint: boolean): void => {
       if (event.pointerId !== this.#activePointerId) return;
       this.#activePointerId = null;
 
-      if (!keep) {
-        this.#recorder.abort();
-        this.#canvas.drawLive([]);
-        return;
-      }
-
-      const stroke = this.#recorder.end(this.#sample(event));
+      const stroke = this.#recorder.end(appendFinalPoint ? this.#sample(event) : undefined);
       this.#canvas.drawLive([]);
       if (stroke !== null) this.#handleStroke(stroke);
     };
 
     surface.addEventListener('pointerup', (e) => finish(e, true));
+
+    /**
+     * A cancelled pointer keeps its stroke rather than discarding it.
+     *
+     * `pointercancel` means the browser took the pointer away mid-gesture. The
+     * earlier behaviour — throw the stroke away — is what made ink stop dead
+     * and vanish partway through a line. Losing work someone deliberately drew
+     * is a far worse failure than keeping a slightly short stroke, and the
+     * classifier already refuses to read a stroke that means nothing.
+     *
+     * The final position is not appended here, because a cancel carries no
+     * meaningful coordinate.
+     */
     surface.addEventListener('pointercancel', (e) => finish(e, false));
 
     // Keep the browser from treating pen drags as text selection or panning.
