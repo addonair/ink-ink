@@ -21,15 +21,21 @@ function bootstrap(): void {
   const url = new URL(window.location.href);
   const adapter = adapterFor(url);
 
-  // Announce injection unconditionally. Without this, "no toggle appeared" is
-  // ambiguous between the script never running and the script running but
-  // finding no adapter — two very different problems, and the console is the
-  // only way to tell them apart from the outside.
-  console.warn(
-    `${LOG_PREFIX} injected on ${url.hostname}; adapter: ${adapter?.id ?? 'none (staying inert)'}`,
-  );
+  // Announce injection, but at debug level on the healthy path.
+  //
+  // Chrome's extension Errors panel lists console.warn output alongside real
+  // errors, so logging a successful injection as a warning made a working
+  // extension look broken — it was reported as a crash. A warning is reserved
+  // for the case that actually deserves attention: injected somewhere with no
+  // adapter, which means the manifest and the registry disagree.
+  if (adapter === null) {
+    console.warn(
+      `${LOG_PREFIX} injected on ${url.hostname} but no adapter matched; staying inert.`,
+    );
+    return; // NFR-9
+  }
 
-  if (adapter === null) return; // NFR-9
+  console.debug(`${LOG_PREFIX} injected on ${url.hostname}; adapter: ${adapter.id}`);
 
   mount(adapter);
 }

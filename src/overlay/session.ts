@@ -346,19 +346,42 @@ export class InkSession {
 
   // --- state -------------------------------------------------------------
 
-  #setEnabled(enabled: boolean): void {
+  /**
+   * Handle a request to turn the pen on or off.
+   *
+   * Health is re-checked on every attempt rather than latched. A response with
+   * no options is a normal state, not a broken one — the next response may well
+   * have some, and the old behaviour disabled the button permanently until the
+   * page was reloaded.
+   */
+  #setEnabled(requested: boolean): void {
+    if (!requested) {
+      this.#applyEnabled(false);
+      return;
+    }
+
+    // Measure on activation so the first stroke is not the one paying for it.
+    this.#measuredAt = 0;
+    this.#targetsNow();
+
+    if (!this.#checkHealth()) {
+      // Nothing markable here. Stay off, and say why in the console so the
+      // markup can be inspected — this is the only route to it on a site
+      // behind a login.
+      this.#applyEnabled(false);
+      this.#logDiagnosis();
+      return;
+    }
+
+    this.#applyEnabled(true);
+  }
+
+  #applyEnabled(enabled: boolean): void {
     this.#enabled = enabled;
+    this.#toggle.setEnabled(enabled);
 
     const root = this.#shadow.querySelector<HTMLElement>('.ink-root');
     if (root !== null) root.dataset['enabled'] = String(enabled);
-
-    if (enabled) {
-      // Measure on activation so the first stroke is not the one paying for it.
-      this.#measuredAt = 0;
-      this.#targetsNow();
-      this.#checkHealth();
-      this.#logDiagnosis();
-    }
   }
 
   #removeMark(strokeId: StrokeId): void {
@@ -449,7 +472,7 @@ export class InkSession {
     }
   }
 
-  #checkHealth(): void {
+  #checkHealth(): boolean {
     let messages: number;
     try {
       messages = this.#adapter.assistantMessages().length;
@@ -462,9 +485,14 @@ export class InkSession {
     // reports every healthy page as broken.
     const targets = messages > 0 ? this.#targetsNow() : [];
     const broken = messages > 0 && targets.length === 0;
+
     this.#toggle.setDegraded(
       broken,
-      broken ? 'ink-ink could not find any options in this response' : undefined,
+      broken
+        ? 'No question options found in this response — try again once one is shown'
+        : undefined,
     );
+
+    return !broken;
   }
 }

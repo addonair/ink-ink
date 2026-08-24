@@ -84,72 +84,100 @@ function isOptionLeaf(el: Element): boolean {
 }
 
 /**
- * Group option elements into questions by maximal runs of consecutive
- * siblings.
+ * The element immediately before `el` in document order, staying inside `root`.
  *
- * This handles both shapes markdown produces: `<li>` items under one `<ul>`
- * (the whole list is one run), and bare `<p>` lines where the next question's
- * prompt interrupts the run. Grouping by parent alone would merge every
- * question in the paragraph case.
+ * Walks the tree rather than only siblings, so a prompt can be found across a
+ * wrapper boundary — `<div><p>3. …</p></div><ul><li><p>A) …</p></li></ul>` is
+ * ordinary renderer output and sibling-only lookup misses it entirely.
  */
-function runsOfOptions(root: HTMLElement): Element[][] {
-  const leaves = new Set<Element>();
-  for (const el of root.querySelectorAll('*')) {
-    if (isOptionLeaf(el)) leaves.add(el);
-  }
-  if (leaves.size === 0) return [];
-
-  const parents = new Set<Element>();
-  for (const leaf of leaves) {
-    if (leaf.parentElement !== null) parents.add(leaf.parentElement);
+function previousInDocument(el: Element, root: Element): Element | null {
+  const sibling = el.previousElementSibling;
+  if (sibling !== null) {
+    let deepest = sibling;
+    while (deepest.lastElementChild !== null) deepest = deepest.lastElementChild;
+    return deepest;
   }
 
-  const runs: Element[][] = [];
-  for (const parent of parents) {
-    let run: Element[] = [];
-    for (const child of parent.children) {
-      if (leaves.has(child)) {
-        run.push(child);
-      } else if (run.length > 0) {
-        runs.push(run);
-        run = [];
-      }
-    }
-    if (run.length > 0) runs.push(run);
-  }
+  const parent = el.parentElement;
+  return parent === null || parent === root ? null : parent;
+}
 
-  // Document order, so question numbering matches reading order.
-  return runs.sort((a, b) => {
-    const first = a[0];
-    const second = b[0];
-    if (first === undefined || second === undefined) return 0;
-    return first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
-  });
+/** Cap on how far back to look for a prompt, so a long message cannot stall. */
+const PROMPT_LOOKBACK = 60;
+
+/**
+ * The question prompt preceding an option line.
+ *
+ * Walks backwards in document order for the nearest substantial text that is
+ * not itself an option. Ancestors of the option list are skipped naturally,
+ * because their text is the option text and parses as an option.
+ */
+function promptBefore(el: Element, root: Element): string {
+  let node = previousInDocument(el, root);
+
+  for (let hops = 0; node !== null && hops < PROMPT_LOOKBACK; hops++) {
+    const text = textOf(node);
+    if (text !== '' && parseOptionLabel(text) === null) return text;
+    node = previousInDocument(node, root);
+  }
+  return '';
+}
+
+interface QuestionGroup {
+  options: Element[];
+  prompt: string;
 }
 
 /**
- * The prompt text for a run of options: the nearest preceding text before the
- * run, climbing out of the list wrapper when the options are `<li>` items.
+ * Group option lines into questions, by document order rather than by parent.
+ *
+ * Grouping by "consecutive children of one parent" was the original approach
+ * and it fails on the shape markdown renderers most often emit:
+ *
+ *     <li><p>A) Berlin</p></li>
+ *     <li><p>B) Paris</p></li>
+ *
+ * The leaf-most match is the `<p>`, and each `<p>` has a different parent, so
+ * every question collapsed into single-option groups and was discarded. A real
+ * chat response parsed to zero options because of it.
+ *
+ * Document order has no such assumption. A new question starts when either:
+ *
+ * - **the label stops advancing** — A, B, C, then A again. Markup-independent
+ *   and the strongest signal available.
+ * - **the preceding prompt changes** — the options now sit under different
+ *   question text.
  */
-function promptFor(run: Element[]): string {
-  const first = run[0];
-  if (first === undefined) return '';
+function groupsOfOptions(root: HTMLElement): QuestionGroup[] {
+  const groups: QuestionGroup[] = [];
+  let current: Element[] = [];
+  let currentPrompt = '';
+  let lastLabel = '';
 
-  let node: Element | null = first.previousElementSibling;
-  if (node === null) {
-    const wrapper = first.parentElement;
-    node = wrapper?.previousElementSibling ?? null;
-  }
+  const flush = (): void => {
+    if (current.length > 0) groups.push({ options: current, prompt: currentPrompt });
+    current = [];
+  };
 
-  // Walk back over anything empty until real text appears.
-  let hops = 0;
-  while (node !== null && hops < 4) {
-    const text = textOf(node);
-    if (text !== '' && parseOptionLabel(text) === null) return text;
-    node = node.previousElementSibling;
-    hops++;
+  // querySelectorAll yields document order, which is what the grouping needs.
+  for (const el of root.querySelectorAll('*')) {
+    if (!isOptionLeaf(el)) continue;
+
+    const parsed = parseOptionLabel(textOf(el));
+    if (parsed === null) continue;
+
+    const prompt = promptBefore(el, root);
+    const advances = current.length === 0 || parsed.label > lastLabel;
+
+    if (!advances || (current.length > 0 && prompt !== currentPrompt)) flush();
+
+    if (current.length === 0) currentPrompt = prompt;
+    current.push(el);
+    lastLabel = parsed.label;
   }
-  return '';
+  flush();
+
+  return groups;
 }
 
 export interface ParseOptions {
@@ -167,17 +195,16 @@ export function parseMcqTargets(message: HTMLElement, options: ParseOptions = {}
   const prefix = options.idPrefix ?? 'q';
   const targets: Target[] = [];
 
-  runsOfOptions(message).forEach((run, index) => {
+  groupsOfOptions(message).forEach((group, index) => {
     // A single matching line is far more likely to be prose that happens to
     // start with a letter and a bracket than a one-option question.
-    if (run.length < 2) return;
+    if (group.options.length < 2) return;
 
-    const prompt = promptFor(run);
-    const numbered = QUESTION_ORDINAL.exec(prompt);
+    const numbered = QUESTION_ORDINAL.exec(group.prompt);
     const ordinal = numbered?.[1] === undefined ? index + 1 : Number(numbered[1]);
     const questionId = `${prefix}-${ordinal}-${index}` as QuestionId;
 
-    for (const el of run) {
+    for (const el of group.options) {
       const text = textOf(el);
       const parsed = parseOptionLabel(text);
       if (parsed === null) continue;

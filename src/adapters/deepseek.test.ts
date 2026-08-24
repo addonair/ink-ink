@@ -202,6 +202,81 @@ describe('paragraph-style options', () => {
   });
 });
 
+describe('nested option markup', () => {
+  // The shapes that made a real DeepSeek response parse to zero options.
+  // Grouping by "consecutive children of one parent" fails all of these,
+  // because each option's parent is a different wrapper element.
+
+  it('parses a loose markdown list: <li><p>A) ...</p></li>', () => {
+    document.body.innerHTML = `
+      <div data-message-author-role="assistant">
+        <p>1. Capital of France?</p>
+        <ul>
+          <li><p>A) Berlin</p></li>
+          <li><p>B) Paris</p></li>
+          <li><p>C) Madrid</p></li>
+        </ul>
+      </div>`;
+    stubLayout();
+
+    const targets = parseMcqTargets(message());
+    expect(targets.map((t) => t.label)).toEqual(['A', 'B', 'C']);
+    expect(new Set(targets.map((t) => t.questionId)).size).toBe(1);
+  });
+
+  it('parses one option per wrapper div', () => {
+    document.body.innerHTML = `
+      <div data-message-author-role="assistant">
+        <p>1. Capital of France?</p>
+        <div><span>A) Berlin</span></div>
+        <div><span>B) Paris</span></div>
+        <div><span>C) Madrid</span></div>
+      </div>`;
+    stubLayout();
+
+    expect(parseMcqTargets(message()).map((t) => t.label)).toEqual(['A', 'B', 'C']);
+  });
+
+  it('splits two questions when the labels restart at A', () => {
+    // The strongest markup-independent signal that a new question began.
+    document.body.innerHTML = `
+      <div data-message-author-role="assistant">
+        <p>1. Capital of France?</p>
+        <ul><li><p>A) Berlin</p></li><li><p>B) Paris</p></li></ul>
+        <p>2. Closest planet?</p>
+        <ul><li><p>A) Venus</p></li><li><p>B) Mercury</p></li></ul>
+      </div>`;
+    stubLayout();
+
+    const targets = parseMcqTargets(message());
+    expect(targets).toHaveLength(4);
+    expect(new Set(targets.map((t) => t.questionId)).size).toBe(2);
+    expect([...new Set(targets.map((t) => t.ordinal))]).toEqual([1, 2]);
+  });
+
+  it('still ignores a lone option-shaped line in prose', () => {
+    document.body.innerHTML = `
+      <div data-message-author-role="assistant">
+        <p>B) Paris is the answer most people give.</p>
+      </div>`;
+    stubLayout();
+
+    expect(parseMcqTargets(message())).toEqual([]);
+  });
+
+  it('finds the question prompt across a wrapper boundary', () => {
+    document.body.innerHTML = `
+      <div data-message-author-role="assistant">
+        <div><p>3. What is 7 x 8?</p></div>
+        <ul><li><p>A) 54</p></li><li><p>B) 56</p></li></ul>
+      </div>`;
+    stubLayout();
+
+    // Ordinal comes from the prompt text, not from position.
+    expect([...new Set(parseMcqTargets(message()).map((t) => t.ordinal))]).toEqual([3]);
+  });
+});
+
 describe('isStreaming', () => {
   it('reports false on a settled page', () => {
     document.body.innerHTML = '<div data-message-author-role="assistant"></div>';

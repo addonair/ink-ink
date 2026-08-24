@@ -131,15 +131,39 @@ describe('InkSession', () => {
     expect(toggle().textContent).toBe('Pen off');
   });
 
-  it('degrades when a page has messages but no parseable options (NFR-9)', () => {
+  it('reports when a response has no parseable options, without latching off (NFR-9)', () => {
     const brokenAdapter: SiteAdapter = {
       ...fixtureAdapter,
       parseTargets: (): Target[] => [], // markup changed underneath us
     };
     session = new InkSession({ adapter: brokenAdapter });
 
-    expect(toggle().disabled).toBe(true);
-    expect(toggle().textContent).toBe('Pen unavailable');
+    expect(toggle().textContent).toBe('No options found');
+
+    // Clicking is refused, but the button stays live: a response with no
+    // options is normal, and the next one may have some. Disabling the button
+    // meant the pen could never be turned on again without a reload.
+    expect(toggle().disabled).toBe(false);
+    toggle().click();
+    expect(toggle().textContent).toBe('No options found');
+    expect(session.markCount).toBe(0);
+  });
+
+  it('recovers once options appear, without a reload', () => {
+    let broken = true;
+    const flaky: SiteAdapter = {
+      ...fixtureAdapter,
+      parseTargets: (message) => (broken ? [] : fixtureAdapter.parseTargets(message)),
+    };
+    session = new InkSession({ adapter: flaky });
+
+    toggle().click();
+    expect(toggle().textContent).toBe('No options found');
+
+    // The next response parses fine.
+    broken = false;
+    toggle().click();
+    expect(toggle().textContent).toBe('Pen on');
   });
 
   it('stays inert rather than throwing when the adapter throws (NFR-9)', () => {

@@ -26,10 +26,16 @@ export class InkToggle {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'ink-toggle';
+    /**
+     * Always report the request; the session decides whether it can be honoured.
+     *
+     * The button used to disable itself when degraded, which latched the whole
+     * feature off: a response with no options is perfectly normal, but once it
+     * happened the pen could never be turned on again without a reload. Health
+     * is re-checked on each attempt instead.
+     */
     button.addEventListener('click', () => {
-      if (this.#degraded) return;
-      this.setEnabled(!this.#enabled);
-      this.#onChange(this.#enabled);
+      this.#onChange(!this.#enabled);
     });
 
     options.container.appendChild(button);
@@ -46,12 +52,15 @@ export class InkToggle {
     return this.#enabled;
   }
 
-  /** Reflect adapter breakage in the UI (NFR-9, spec section 8). */
+  /**
+   * Reflect that nothing markable was found (NFR-9, spec section 8).
+   *
+   * Deliberately does not disable the button — see the click handler.
+   */
   setDegraded(degraded: boolean, reason?: string): void {
     this.#degraded = degraded;
-    this.#button.disabled = degraded;
     this.#button.title = degraded
-      ? (reason ?? 'ink-ink could not read this page')
+      ? (reason ?? 'No question options found in this response — try again after one is shown')
       : 'Toggle pen marking';
     this.#paint();
   }
@@ -61,7 +70,9 @@ export class InkToggle {
   }
 
   #paint(): void {
-    const label = this.#degraded ? 'Pen unavailable' : this.#enabled ? 'Pen on' : 'Pen off';
+    // Name the actual situation. "Pen unavailable" read as a broken extension
+    // when the real meaning is that this response has nothing to mark.
+    const label = this.#degraded ? 'No options found' : this.#enabled ? 'Pen on' : 'Pen off';
 
     this.#button.dataset['state'] = this.#degraded ? 'degraded' : this.#enabled ? 'on' : 'off';
     this.#button.setAttribute('aria-pressed', String(this.#enabled));

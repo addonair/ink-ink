@@ -17,7 +17,10 @@ export default tseslint.config(
       ],
       '@typescript-eslint/consistent-type-imports': 'error',
       eqeqeq: ['error', 'always'],
-      'no-console': ['warn', { allow: ['warn', 'error'] }],
+      // `debug` is allowed for diagnostics: Chrome's extension Errors panel
+      // lists `warn` alongside real errors, so healthy status lines must not
+      // use it or a working extension looks broken.
+      'no-console': ['warn', { allow: ['warn', 'error', 'debug'] }],
     },
   },
 
