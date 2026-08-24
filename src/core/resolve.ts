@@ -16,7 +16,7 @@ import {
   rectCenter,
   rectIntersectionArea,
 } from './geometry';
-import type { MarkKind, Resolution, Stroke, Target } from './types';
+import type { MarkKind, Rect, Resolution, Stroke, Target } from './types';
 
 /**
  * Minimum confidence for a resolution to count (FR-19).
@@ -51,6 +51,26 @@ export const OUTSIDE_PATH_PENALTY = 0.4;
 
 /** Distance in px at which a tick's proximity score falls to one half. */
 export const PROXIMITY_FALLOFF = 40;
+
+/** Distance in px at which an underline's vertical score falls to one half. */
+export const UNDERLINE_FALLOFF = 14;
+
+/**
+ * How much harder it is for a line to claim text BELOW it than above it.
+ *
+ * An underline is drawn beneath its words, so vertical distance downward from
+ * an option is expected and distance upward is not. Without this asymmetry a
+ * line under option B scores better against option C, which sits closer to it.
+ */
+export const UNDERLINE_ABOVE_PENALTY = 3;
+
+/**
+ * Score for a line at the very top of an option's box.
+ *
+ * Not 1: a line grazing the top of an option is far more likely to be
+ * underlining the option above it, especially when boxes are adjacent.
+ */
+export const UNDERLINE_INSIDE_FLOOR = 0.55;
 
 export interface ResolveOptions {
   minConfidence: number;
@@ -144,6 +164,65 @@ export function scoreByProximity(stroke: Stroke, targets: readonly Target[]): Sc
     .sort(byScoreDescending);
 }
 
+/**
+ * How well a line's height fits an option, from 0 to 1.
+ *
+ * A line belongs to the text it sits at the BOTTOM of. Scoring "anywhere inside
+ * the box" as a perfect match is wrong on real markup, where list items are
+ * adjacent: a line drawn 3px under option B is then literally inside option C's
+ * box, and C wins with a perfect score. That silently marked the wrong answer.
+ *
+ * So position within the box matters. Near the bottom edge is the best fit,
+ * higher up is progressively worse, just below is nearly as good as inside, and
+ * above the box is heavily penalised — a line does not underline the text below
+ * it.
+ */
+function verticalFit(lineY: number, box: Rect): number {
+  const top = box.y;
+  const bottom = box.y + box.height;
+
+  if (lineY >= top && lineY <= bottom) {
+    const height = Math.max(box.height, 1);
+    const depth = (lineY - top) / height; // 0 at the top edge, 1 at the bottom
+    return UNDERLINE_INSIDE_FLOOR + (1 - UNDERLINE_INSIDE_FLOOR) * depth;
+  }
+
+  const dy = lineY > bottom ? lineY - bottom : (top - lineY) * UNDERLINE_ABOVE_PENALTY;
+  return 1 / (1 + dy / UNDERLINE_FALLOFF);
+}
+
+/**
+ * Score every candidate for an underline or strike-through.
+ *
+ * Two factors multiplied:
+ *
+ * - **How much of the line runs along the option horizontally.** A line has to
+ *   travel across the words it marks, so horizontal overlap is the primary
+ *   signal — and it is what rejects a line drawn far off to one side.
+ * - **How close the line sits vertically, biased upward.** The line belongs to
+ *   the text above it, so distance downward from an option costs far less than
+ *   distance upward.
+ */
+export function scoreByUnderline(stroke: Stroke, targets: readonly Target[]): ScoredTarget[] {
+  const box = boundingBox(stroke.points);
+  const centre = centroid(stroke.points);
+  if (box === null || centre === null) return [];
+
+  const lineWidth = Math.max(box.width, 1);
+
+  return targets
+    .map((target) => {
+      const b = target.bounds;
+
+      const overlap = Math.min(box.x + box.width, b.x + b.width) - Math.max(box.x, b.x);
+      if (overlap <= 0) return { target, score: 0 };
+      const horizontal = clamp01(overlap / lineWidth);
+
+      return { target, score: clamp01(horizontal * verticalFit(centre.y, b)) };
+    })
+    .sort(byScoreDescending);
+}
+
 const unresolved = (
   reason: Extract<Resolution, { status: 'unresolved' }>['reason'],
   confidence = 0,
@@ -162,6 +241,18 @@ const unresolved = (
  *
  * It never throws on unparseable input and never guesses (FR-19, NFR-9).
  */
+/** Pick the scoring strategy that matches the gesture. */
+function scoreFor(kind: MarkKind, stroke: Stroke, targets: readonly Target[]): ScoredTarget[] {
+  switch (kind) {
+    case 'circle':
+      return scoreByEnclosure(stroke, targets);
+    case 'underline':
+      return scoreByUnderline(stroke, targets);
+    default:
+      return scoreByProximity(stroke, targets);
+  }
+}
+
 export function resolveStroke(
   stroke: Stroke,
   kind: MarkKind,
@@ -174,10 +265,7 @@ export function resolveStroke(
 
     if (kind === 'unknown') return unresolved('unclassified-stroke');
 
-    const scored =
-      kind === 'circle'
-        ? scoreByEnclosure(stroke, candidates)
-        : scoreByProximity(stroke, candidates);
+    const scored = scoreFor(kind, stroke, candidates);
 
     const best = scored[0];
     if (best === undefined) return unresolved('no-targets');

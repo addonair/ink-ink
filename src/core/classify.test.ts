@@ -78,6 +78,40 @@ describe('classifyStroke', () => {
     expect(classifyStroke(stroke(sliver))).toBe('unknown');
   });
 
+  it('classifies a long flat stroke as an underline', () => {
+    // Drawn left to right under a line of text, with the small wobble a real
+    // hand produces.
+    const line: Array<[number, number]> = Array.from({ length: 12 }, (_, i) => [
+      100 + i * 18,
+      200 + (i % 2),
+    ]);
+    expect(classifyStroke(stroke(line))).toBe('underline');
+  });
+
+  it('classifies a right-to-left underline the same way', () => {
+    const line: Array<[number, number]> = Array.from({ length: 12 }, (_, i) => [
+      300 - i * 18,
+      200 + (i % 2),
+    ]);
+    expect(classifyStroke(stroke(line))).toBe('underline');
+  });
+
+  it('does not read a tall stroke as an underline', () => {
+    const vertical: Array<[number, number]> = Array.from({ length: 12 }, (_, i) => [
+      100 + (i % 2),
+      100 + i * 18,
+    ]);
+    expect(classifyStroke(stroke(vertical))).not.toBe('underline');
+  });
+
+  it('still reads a closed loop as a circle, not an underline', () => {
+    // A wide, flat ellipse is closed, so enclosure wins over flatness.
+    const flatLoop = loop(200, 200, 90).map(
+      ([x, y]) => [x, 200 + (y - 200) * 0.25] as [number, number],
+    );
+    expect(classifyStroke(stroke(flatLoop))).toBe('circle');
+  });
+
   it('accepts injected thresholds so tuning needs no code change', () => {
     const small = loop(10, 10, 4);
 
@@ -90,6 +124,8 @@ describe('classifyStroke', () => {
         closureRatio: 0.25,
         minLoopPathLength: 5,
         minLoopArea: 10,
+        minUnderlineAspect: 3,
+        minUnderlineStraightness: 0.75,
       }),
     ).toBe('circle');
   });

@@ -155,6 +155,54 @@ describe('scoreByProximity (FR-18)', () => {
   });
 });
 
+describe('scoreByUnderline (underline marks)', () => {
+  const under = (y: number, from = 110, to = 290) =>
+    stroke(
+      Array.from({ length: 10 }, (_, i) => [from + ((to - from) * i) / 9, y] as [number, number]),
+    );
+
+  it('resolves to the option the line runs along, not the one below it', () => {
+    // The case that separates underline scoring from proximity scoring.
+    //
+    // B spans y 130..150, C spans y 160..180. A line at y 156 sits 6px below
+    // B and 4px above C, so nearest-centroid picks C — the wrong answer. An
+    // underline belongs to the text ABOVE it.
+    const s = under(156);
+
+    expect(scoreByProximity(s, ALL)[0]?.target.label).toBe('C');
+
+    const r = resolveStroke(s, 'underline', ALL);
+    expect(r.status).toBe('resolved');
+    expect(r.status === 'resolved' && r.target.label).toBe('B');
+  });
+
+  it('picks the option a line sits under, when the boxes touch', () => {
+    // The realistic layout: rendered list items are ADJACENT, so "just below
+    // option B" is literally inside option C's box. Scoring "inside the box"
+    // as a perfect match therefore hands the answer to C. Found in a browser;
+    // the earlier fixtures had a 10px gap between options and hid it.
+    const b = option('b2', 'B', { x: 100, y: 130, width: 200, height: 20 });
+    const c = option('c2', 'C', { x: 100, y: 150, width: 200, height: 20 });
+
+    const s = under(153); // 3px under B's text, and inside C's box
+    const r = resolveStroke(s, 'underline', [b, c]);
+
+    expect(r.status).toBe('resolved');
+    expect(r.status === 'resolved' && r.target.label).toBe('B');
+  });
+
+  it('resolves a line drawn through the text to that option', () => {
+    const r = resolveStroke(under(140), 'underline', ALL);
+    expect(r.status === 'resolved' && r.target.label).toBe('B');
+  });
+
+  it('ignores an option the line does not run along horizontally', () => {
+    // Far off to the right of every option box.
+    const s = under(140, 900, 1200);
+    expect(resolveStroke(s, 'underline', ALL).status).toBe('unresolved');
+  });
+});
+
 describe('resolveStroke', () => {
   it('returns unresolved/no-targets when there are no candidates', () => {
     const r = resolveStroke(stroke(loopAround(100, 130, 200, 20)), 'circle', []);

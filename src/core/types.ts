@@ -76,8 +76,15 @@ export interface Target {
   ordinal?: number;
 }
 
-/** How a stroke was interpreted geometrically (spec section 3). */
-export type MarkKind = 'circle' | 'tick' | 'unknown';
+/**
+ * How a stroke was interpreted geometrically.
+ *
+ * The spec scoped circle and tick (section 3). `underline` was added after
+ * field use: it is the gesture people actually reach for on a line of text, and
+ * it needs its own resolution rule because a line sits *below* its text and so
+ * lands nearer the following option.
+ */
+export type MarkKind = 'circle' | 'tick' | 'underline' | 'unknown';
 
 /**
  * The outcome of resolving one stroke against the candidate targets.

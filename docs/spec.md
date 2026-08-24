@@ -43,7 +43,10 @@ session. No API keys, no per-token cost, no separate account.
 - Chrome/Edge desktop, Manifest V3
 - One supported host site to start (DeepSeek), architected for more
 - Stylus input as primary; finger reserved for scrolling
-- Two mark types: **circle** (enclose an option) and **tick** (point at an option)
+- Three mark types: **circle** (enclose an option), **tick** (point at an
+  option), and **underline** (run a line along an option). Underline was added
+  after field use — see `.claude/decisions/underline-mark.md`; the original
+  scope was circle and tick only.
 - MCQ answering flow — the primary use case
 - Text-span referencing flow — the secondary use case
 

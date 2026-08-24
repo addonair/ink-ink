@@ -29,7 +29,7 @@ const REASON_TEXT: Record<string, string> = {
   'no-targets': 'nothing recognisable underneath',
   'below-threshold': 'not clearly over an option',
   ambiguous: 'between two options',
-  'unclassified-stroke': 'not read as a circle or tick',
+  'unclassified-stroke': 'not read as a circle, tick or underline',
 };
 
 export class ReviewPanel {
