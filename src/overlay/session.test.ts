@@ -386,6 +386,126 @@ describe('InkSession', () => {
     });
   });
 
+  describe('moving the panel', () => {
+    const panel = (): HTMLElement => {
+      const el = shadowOf().querySelector<HTMLElement>('.ink-review-panel');
+      if (el === null) throw new Error('no panel');
+      return el;
+    };
+    const header = (): HTMLElement => {
+      const el = panel().querySelector('header');
+      if (el === null) throw new Error('no header');
+      return el;
+    };
+    const drag = (from: [number, number], to: [number, number]): void => {
+      const send = (type: string, [x, y]: [number, number]): void => {
+        header().dispatchEvent(
+          new PointerEvent(type, {
+            pointerType: 'mouse',
+            pointerId: 31,
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            clientX: x,
+            clientY: y,
+          }),
+        );
+      };
+      send('pointerdown', from);
+      send('pointermove', to);
+      send('pointerup', to);
+    };
+
+    beforeEach(() => {
+      // jsdom reports a zero-size panel, so clamping has the whole viewport.
+      Object.defineProperty(window, 'innerWidth', { value: 1000, configurable: true });
+      Object.defineProperty(window, 'innerHeight', { value: 800, configurable: true });
+    });
+
+    it('starts at the stylesheet default, with no inline position', () => {
+      session = new InkSession({ adapter: fixtureAdapter });
+      expect(panel().style.left).toBe('');
+      expect(panel().style.top).toBe('');
+    });
+
+    it('follows a drag on the header', () => {
+      session = new InkSession({ adapter: fixtureAdapter });
+      drag([0, 0], [240, 160]);
+
+      expect(panel().style.left).toBe('240px');
+      expect(panel().style.top).toBe('160px');
+    });
+
+    it('reports the new position so it can be remembered', () => {
+      const moves: Array<{ x: number; y: number }> = [];
+      session = new InkSession({
+        adapter: fixtureAdapter,
+        onPanelMoved: (p) => moves.push(p),
+      });
+
+      drag([0, 0], [120, 90]);
+
+      expect(moves).toEqual([{ x: 120, y: 90 }]);
+    });
+
+    it('keeps the panel on screen, so the header stays grabbable', () => {
+      // Dragged far past the edge, it would otherwise be impossible to get back.
+      session = new InkSession({ adapter: fixtureAdapter });
+      drag([0, 0], [99999, 99999]);
+
+      expect(parseInt(panel().style.left, 10)).toBeLessThanOrEqual(1000);
+      expect(parseInt(panel().style.top, 10)).toBeLessThanOrEqual(800);
+      expect(parseInt(panel().style.left, 10)).toBeGreaterThanOrEqual(0);
+      expect(parseInt(panel().style.top, 10)).toBeGreaterThanOrEqual(0);
+    });
+
+    it('restores a saved position on mount', () => {
+      session = new InkSession({ adapter: fixtureAdapter, panelPosition: { x: 60, y: 40 } });
+
+      expect(panel().style.left).toBe('60px');
+      expect(panel().style.top).toBe('40px');
+    });
+
+    it('does not start a drag from a header button', () => {
+      // Otherwise collapsing or dismissing would move the panel instead.
+      session = new InkSession({ adapter: fixtureAdapter });
+      const collapse = shadowOf().querySelector<HTMLButtonElement>('.ink-collapse');
+
+      collapse?.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          pointerType: 'mouse',
+          pointerId: 32,
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          clientX: 5,
+          clientY: 5,
+        }),
+      );
+      header().dispatchEvent(
+        new PointerEvent('pointermove', {
+          pointerType: 'mouse',
+          pointerId: 32,
+          bubbles: true,
+          cancelable: true,
+          clientX: 400,
+          clientY: 400,
+        }),
+      );
+
+      expect(panel().style.left).toBe('');
+    });
+
+    it('double-clicking the header puts it back', () => {
+      session = new InkSession({ adapter: fixtureAdapter, panelPosition: { x: 300, y: 200 } });
+      expect(panel().style.left).toBe('300px');
+
+      header().dispatchEvent(new MouseEvent('dblclick', { bubbles: true, composed: true }));
+
+      expect(panel().style.left).toBe('');
+    });
+  });
+
   it('submit() does nothing when no marks are resolved', async () => {
     session = new InkSession({ adapter: fixtureAdapter });
 

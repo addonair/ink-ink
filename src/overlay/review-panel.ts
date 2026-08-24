@@ -27,8 +27,16 @@ export interface QuestionRow {
   flagged: boolean;
 }
 
+/** Where the panel sits, in viewport pixels from the top-left. */
+export interface PanelPosition {
+  x: number;
+  y: number;
+}
+
 export interface ReviewPanelOptions {
   container: HTMLElement;
+  /** Called when the user finishes dragging, so the position can be kept. */
+  onMoved?(position: PanelPosition): void;
   onRemoveMark(strokeId: StrokeId): void;
   onToggleFlag(questionId: QuestionId): void;
   onUndo(): void;
@@ -47,6 +55,10 @@ const REASON_TEXT: Record<string, string> = {
 export class ReviewPanel {
   readonly #root: HTMLElement;
   readonly #body: HTMLElement;
+  /** null means the default corner from the stylesheet. */
+  #position: PanelPosition | null = null;
+  #dragFrom: { x: number; y: number } | null = null;
+  readonly #onWindowResize = (): void => this.#applyPosition();
   readonly #collapseButton: HTMLButtonElement;
   #collapsed = false;
   readonly #list: HTMLElement;
@@ -89,6 +101,54 @@ export class ReviewPanel {
     dismiss.addEventListener('click', () => options.onDismiss());
 
     header.append(collapse, count, dismiss);
+
+    /**
+     * Drag by the header.
+     *
+     * Buttons inside it are excluded, or collapsing and dismissing would start
+     * a drag instead of firing. Pen events reach here because the session
+     * refuses to claim anything inside the overlay's own shadow root.
+     */
+    header.addEventListener('pointerdown', (event) => {
+      if ((event.target as Element | null)?.closest('button') !== null) return;
+
+      const rect = root.getBoundingClientRect();
+      this.#dragFrom = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      try {
+        header.setPointerCapture(event.pointerId);
+      } catch {
+        /* capture is an enhancement; dragging still works without it */
+      }
+      event.preventDefault();
+    });
+
+    header.addEventListener('pointermove', (event) => {
+      if (this.#dragFrom === null) return;
+      this.#position = {
+        x: event.clientX - this.#dragFrom.x,
+        y: event.clientY - this.#dragFrom.y,
+      };
+      this.#applyPosition();
+    });
+
+    const endDrag = (): void => {
+      if (this.#dragFrom === null) return;
+      this.#dragFrom = null;
+      if (this.#position !== null) options.onMoved?.(this.#position);
+    };
+    header.addEventListener('pointerup', endDrag);
+    header.addEventListener('pointercancel', endDrag);
+
+    // Double-click the header to put it back where it started.
+    header.addEventListener('dblclick', (event) => {
+      if ((event.target as Element | null)?.closest('button') !== null) return;
+      this.setPosition(null);
+      options.onMoved?.({ x: -1, y: -1 });
+    });
+
+    // A panel dragged to the edge must not end up unreachable when the window
+    // shrinks.
+    window.addEventListener('resize', this.#onWindowResize, { passive: true });
 
     const list = document.createElement('ul');
     list.className = 'ink-mark-list';
@@ -147,11 +207,56 @@ export class ReviewPanel {
     this.#collapseButton.textContent = collapsed ? '▸' : '▾';
     this.#collapseButton.setAttribute('aria-expanded', String(!collapsed));
     this.#collapseButton.title = collapsed ? 'Show the answers' : 'Collapse to the summary';
+    this.#applyPosition();
   }
 
   /** Whether the panel is collapsed to its header. */
   get collapsed(): boolean {
     return this.#collapsed;
+  }
+
+  /**
+   * Move the panel, or pass null to return it to the stylesheet's corner.
+   *
+   * Negative coordinates are treated as "no stored position", so a caller
+   * restoring a saved value does not have to special-case the absence of one.
+   */
+  setPosition(position: PanelPosition | null): void {
+    this.#position = position !== null && position.x >= 0 && position.y >= 0 ? position : null;
+    this.#applyPosition();
+  }
+
+  /** Where the panel currently sits, or null when it is at its default. */
+  get position(): PanelPosition | null {
+    return this.#position;
+  }
+
+  /**
+   * Place the panel, keeping all of it on screen.
+   *
+   * Clamped on every apply rather than only while dragging, because collapsing
+   * changes the height and resizing changes the viewport — either could
+   * otherwise strand the header off the edge where it cannot be grabbed back.
+   */
+  #applyPosition(): void {
+    const style = this.#root.style;
+
+    if (this.#position === null) {
+      style.left = '';
+      style.top = '';
+      style.right = '';
+      style.bottom = '';
+      return;
+    }
+
+    const rect = this.#root.getBoundingClientRect();
+    const maxX = Math.max(0, window.innerWidth - rect.width);
+    const maxY = Math.max(0, window.innerHeight - rect.height);
+
+    style.left = `${Math.min(Math.max(0, this.#position.x), maxX)}px`;
+    style.top = `${Math.min(Math.max(0, this.#position.y), maxY)}px`;
+    style.right = 'auto';
+    style.bottom = 'auto';
   }
 
   /**
@@ -220,6 +325,7 @@ export class ReviewPanel {
   }
 
   destroy(): void {
+    window.removeEventListener('resize', this.#onWindowResize);
     this.#root.remove();
   }
 

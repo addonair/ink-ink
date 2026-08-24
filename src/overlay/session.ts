@@ -20,7 +20,7 @@ import { composeAnswerMessage, DEFAULT_TRAILING_INSTRUCTION } from '@compose/mes
 import { MarkSet } from '@state/marks';
 
 import { InkCanvas } from './ink-canvas';
-import { ReviewPanel, type QuestionRow } from './review-panel';
+import { ReviewPanel, type PanelPosition, type QuestionRow } from './review-panel';
 import { InkToggle } from './toggle';
 import overlayCss from './overlay.css?inline';
 
@@ -32,6 +32,10 @@ export interface SessionOptions {
   /** Where to mount. Defaults to document.body. */
   host?: HTMLElement;
   trailingInstruction?: string;
+  /** Restored panel position, if the user moved it before. */
+  panelPosition?: PanelPosition | null;
+  /** Called when the user drags the panel, so the position can be persisted. */
+  onPanelMoved?(position: PanelPosition): void;
 }
 
 /** How long a cached target measurement stays valid (NFR-4). */
@@ -121,7 +125,12 @@ export class InkSession {
         void this.submit().then((outcome) => this.#panel.reportSubmission(outcome));
       },
       onDismiss: () => this.#panel.hide(),
+      ...(options.onPanelMoved === undefined ? {} : { onMoved: options.onPanelMoved }),
     });
+
+    if (options.panelPosition !== undefined) {
+      this.#panel.setPosition(options.panelPosition);
+    }
 
     // FR-12: a resize reflows the host page, moving text to entirely different
     // document coordinates. Re-measure and shift the ink to follow it.
@@ -201,6 +210,11 @@ export class InkSession {
     this.#canvas.clear();
     this.#refreshPanel();
     this.#panel.setPreview('');
+  }
+
+  /** Move the panel, or pass null to return it to its default corner. */
+  setPanelPosition(position: PanelPosition | null): void {
+    this.#panel.setPosition(position);
   }
 
   setTrailingInstruction(value: string): void {

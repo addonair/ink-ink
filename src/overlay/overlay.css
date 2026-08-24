@@ -110,6 +110,18 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
+
+  /* The header is the drag handle. */
+  cursor: move;
+  /* Stop a pen or finger drag turning into a page scroll mid-move. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Buttons in the header are still buttons, not part of the handle. */
+.ink-review-panel header button {
+  cursor: pointer;
 }
 
 /* The count takes the slack so the two buttons sit at either end. */
