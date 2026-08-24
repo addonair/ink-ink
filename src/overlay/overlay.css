@@ -1,65 +1,191 @@
 /**
  * Overlay styles.
  *
- * NFR-11: these are injected into a shadow root, never the host document, so
- * nothing here can affect host page rendering. Keep it that way — a stray
- * selector in the light DOM is how an extension breaks someone's site.
+ * NFR-11: injected into a shadow root, never the host document, so nothing here
+ * can affect host page rendering. Keep it that way — a stray selector in the
+ * light DOM is how an extension breaks someone's site.
  *
- * SCAFFOLD: structural rules only.
+ * Stroke colours are NOT here: the ink is drawn on a canvas, which cannot read
+ * CSS custom properties. They live in `ink-canvas.ts` so there is exactly one
+ * source of truth for them.
  */
 
 :host {
   all: initial;
-  font-family: system-ui, sans-serif;
 }
 
 .ink-root {
-  position: absolute;
-  inset: 0;
-  /* FR-3: the layer intercepts nothing until it is explicitly enabled. */
-  pointer-events: none;
-  z-index: 2147483000;
-}
-
-.ink-root[data-enabled='true'] .ink-canvas {
-  pointer-events: auto;
-  /* FR-6 / US-8: the browser keeps handling touch, so finger-scroll survives. */
-  touch-action: pan-x pan-y;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #111827;
 }
 
 .ink-canvas {
-  position: absolute;
+  position: fixed;
   inset: 0;
+  z-index: 2147483000;
+  /* FR-3: the layer intercepts nothing until it is explicitly enabled. */
   pointer-events: none;
+  /* FR-6 / US-8: the browser keeps handling touch, so finger-scroll survives. */
+  touch-action: pan-x pan-y;
 }
 
 /* NFR-12: mode is visible at all times, without covering content. */
 .ink-toggle {
   position: fixed;
-  right: 1rem;
-  bottom: 6rem;
+  right: 16px;
+  bottom: 92px;
+  z-index: 2147483001;
   pointer-events: auto;
+
+  font: inherit;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
+  cursor: pointer;
+}
+
+.ink-toggle[data-state='on'] {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+
+.ink-toggle[data-state='degraded'] {
+  background: #f3f4f6;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.ink-toggle:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
 }
 
 /* NFR-13: dismissible, and never blocking the conversation. */
 .ink-review-panel {
   position: fixed;
-  right: 1rem;
-  bottom: 1rem;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483001;
+  pointer-events: auto;
+
+  width: min(320px, calc(100vw - 32px));
   max-height: 40vh;
   overflow-y: auto;
-  pointer-events: auto;
+
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
+  padding: 10px 12px;
 }
 
 .ink-review-panel[hidden] {
   display: none;
 }
 
-/* FR-13 / FR-20: an unresolved mark must look different from a resolved one. */
-.ink-mark[data-state='resolved'] {
-  --ink-stroke: #2563eb;
+.ink-review-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
-.ink-mark[data-state='unresolved'] {
-  --ink-stroke: #dc2626;
+.ink-dismiss,
+.ink-remove {
+  font: inherit;
+  line-height: 1;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+.ink-dismiss:hover,
+.ink-remove:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.ink-mark-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.ink-mark-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+/* FR-13 / FR-20: an unresolved mark must look different from a resolved one. */
+.ink-mark-list li[data-state='unresolved'] span {
+  color: #b91c1c;
+  font-style: italic;
+}
+
+.ink-preview {
+  margin: 0 0 8px;
+  padding: 8px;
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 6px;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.ink-preview[hidden] {
+  display: none;
+}
+
+.ink-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.ink-actions button {
+  font: inherit;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  cursor: pointer;
+}
+
+.ink-actions .ink-submit {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+
+.ink-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ink-actions button:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
 }

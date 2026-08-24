@@ -1,17 +1,21 @@
 /**
  * Content script entry point.
  *
- * This file runs inside someone's chat page, so unlike the rest of the
- * scaffold it contains no throwing stubs. NFR-9 is absolute here: if anything
- * is missing or unrecognised, the extension does nothing and the page is
- * untouched. Breaking the page the user is trying to read is the single worst
- * outcome this project can produce.
+ * This file runs inside someone's chat page. NFR-9 is absolute here: if
+ * anything is missing or unrecognised, the extension does nothing and the page
+ * is untouched. Breaking the page the user is trying to read is the single
+ * worst outcome this project can produce.
  */
 
 import { adapterFor } from '@adapters/registry';
 import type { SiteAdapter } from '@adapters/types';
+import { InkSession } from '@overlay/session';
+import { DEFAULT_TRAILING_INSTRUCTION } from '@compose/message';
 
 const LOG_PREFIX = '[ink-ink]';
+const STORAGE_KEY = 'trailingInstruction';
+
+let session: InkSession | null = null;
 
 function bootstrap(): void {
   const adapter = adapterFor(new URL(window.location.href));
@@ -25,23 +29,29 @@ function bootstrap(): void {
 }
 
 function mount(adapter: SiteAdapter): void {
-  // SCAFFOLD. The real implementation wires up, in this order:
-  //
-  //   1. a shadow root host appended to document.body, so overlay styles
-  //      cannot leak into the page (NFR-11)
-  //   2. InkToggle, defaulting to OFF (FR-4)
-  //   3. InkCanvas, pointer-events: none until enabled (FR-3)
-  //   4. pointer listeners filtered through core's shouldCapture (FR-5/6/7),
-  //      converting each event to document coordinates before recording (FR-9)
-  //   5. on pointerup: classifyStroke -> resolveStroke against
-  //      adapter.parseTargets(), then MarkSet.add (FR-17..FR-22)
-  //   6. a cached target measurement invalidated on scroll/resize/mutation,
-  //      never re-measured per pointer event (NFR-4)
-  //   7. ReviewPanel, and on submit adapter.insertText() — never a send (FR-27)
-  //
-  // Every step must be individually failure-tolerant. An adapter returning
-  // nothing should surface as a degraded toggle, not an exception.
-  console.warn(`${LOG_PREFIX} adapter "${adapter.id}" matched; UI not yet implemented.`);
+  session = new InkSession({ adapter });
+
+  // The one stored setting (FR-26, spec section 5.6). Read after mounting so a
+  // storage failure delays nothing and breaks nothing.
+  void readTrailingInstruction().then((value) => {
+    session?.setTrailingInstruction(value);
+  });
+
+  chrome.storage?.onChanged.addListener((changes, area) => {
+    const change = changes[STORAGE_KEY];
+    if (area !== 'sync' || change === undefined) return;
+    if (typeof change.newValue === 'string') session?.setTrailingInstruction(change.newValue);
+  });
+}
+
+async function readTrailingInstruction(): Promise<string> {
+  try {
+    const stored = await chrome.storage.sync.get(STORAGE_KEY);
+    const value: unknown = stored[STORAGE_KEY];
+    return typeof value === 'string' ? value : DEFAULT_TRAILING_INSTRUCTION;
+  } catch {
+    return DEFAULT_TRAILING_INSTRUCTION;
+  }
 }
 
 try {

@@ -76,8 +76,16 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'warn',
         {
+          /**
+           * Flags selectors that look like they target the HOST page.
+           *
+           * The extension's own UI lives under the `.ink-` / `[data-ink-`
+           * namespace inside its shadow root, and querying that is legitimate —
+           * exempting it keeps the warning meaningful. A rule that cries wolf
+           * on correct code is one people learn to scroll past.
+           */
           selector:
-            'CallExpression[callee.property.name=/^(querySelector|querySelectorAll|getElementsByClassName)$/] > Literal[value=/[.#\\[]/]',
+            'CallExpression[callee.property.name=/^(querySelector|querySelectorAll|getElementsByClassName)$/] > Literal[value=/^(?!\\.ink-)(?!\\[data-ink-).*[.#\\[]/]',
           message:
             'Host-site selectors belong in src/adapters (NFR-10), not in the content or overlay layer.',
         },

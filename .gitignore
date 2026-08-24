@@ -22,3 +22,4 @@ Thumbs.db
 # Python bytecode (the living-codebase scripts)
 __pycache__/
 *.pyc
+dist-demo/

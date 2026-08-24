@@ -30,6 +30,12 @@ export default defineConfig({
      */
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    /**
+     * Process CSS so `overlay.css?inline` returns the real stylesheet rather
+     * than an empty string. Without this the NFR-11 assertion — that styles are
+     * injected into the shadow root — passes vacuously against ''.
+     */
+    css: true,
     coverage: {
       include: ['src/core/**', 'src/compose/**', 'src/state/**'],
     },
