@@ -108,9 +108,47 @@
 .ink-review-panel header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   margin-bottom: 6px;
+}
+
+/* The count takes the slack so the two buttons sit at either end. */
+.ink-review-panel header strong {
+  flex: 1;
+}
+
+/*
+ * Collapsed, the panel is just its summary line, so it stops being a tall
+ * block over the conversation while still saying how many are answered.
+ */
+.ink-review-panel[data-collapsed='true'] {
+  max-height: none;
+  overflow: visible;
+}
+
+.ink-body[hidden] {
+  display: none;
+}
+
+.ink-collapse {
+  font: inherit;
+  line-height: 1;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+.ink-collapse:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.ink-collapse:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
 }
 
 .ink-dismiss,

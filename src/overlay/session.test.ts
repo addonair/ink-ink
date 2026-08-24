@@ -336,6 +336,56 @@ describe('InkSession', () => {
     });
   });
 
+  describe('collapsing the panel', () => {
+    const collapseButton = (): HTMLButtonElement => {
+      const el = shadowOf().querySelector<HTMLButtonElement>('.ink-collapse');
+      if (el === null) throw new Error('no collapse button');
+      return el;
+    };
+    const body = (): HTMLElement => {
+      const el = shadowOf().querySelector<HTMLElement>('.ink-body');
+      if (el === null) throw new Error('no panel body');
+      return el;
+    };
+
+    beforeEach(() => {
+      session = new InkSession({ adapter: fixtureAdapter });
+      toggle().click();
+    });
+
+    it('hides everything below the header, keeping the summary', () => {
+      expect(body().hidden).toBe(false);
+
+      collapseButton().click();
+
+      expect(body().hidden).toBe(true);
+      // The count line survives, so a collapsed panel still says where you are.
+      expect(shadowOf().querySelector('.ink-review-panel header strong')?.textContent).toContain(
+        'answered',
+      );
+    });
+
+    it('stays collapsed while marking', () => {
+      // update() calls show(), so without care the next stroke would re-expand
+      // the panel — making collapse useless exactly while drawing.
+      collapseButton().click();
+      expect(body().hidden).toBe(true);
+
+      drawSquare();
+
+      expect(session!.markCount).toBe(1);
+      expect(body().hidden).toBe(true);
+    });
+
+    it('expands again on a second press', () => {
+      collapseButton().click();
+      collapseButton().click();
+
+      expect(body().hidden).toBe(false);
+      expect(collapseButton().getAttribute('aria-expanded')).toBe('true');
+    });
+  });
+
   it('submit() does nothing when no marks are resolved', async () => {
     session = new InkSession({ adapter: fixtureAdapter });
 

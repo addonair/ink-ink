@@ -46,6 +46,9 @@ const REASON_TEXT: Record<string, string> = {
 
 export class ReviewPanel {
   readonly #root: HTMLElement;
+  readonly #body: HTMLElement;
+  readonly #collapseButton: HTMLButtonElement;
+  #collapsed = false;
   readonly #list: HTMLElement;
   readonly #preview: HTMLElement;
   readonly #submit: HTMLButtonElement;
@@ -61,15 +64,31 @@ export class ReviewPanel {
     root.setAttribute('aria-label', 'Marked answers');
 
     const header = document.createElement('header');
+
+    /**
+     * Collapse to just the header.
+     *
+     * Distinct from dismiss: dismissing hides the panel entirely, and the next
+     * mark brings it straight back. Collapsing keeps the summary line in view
+     * while getting the list out of the way, which is what a long question list
+     * actually needs.
+     */
+    const collapse = document.createElement('button');
+    collapse.type = 'button';
+    collapse.className = 'ink-collapse';
+    collapse.addEventListener('click', () => this.#setCollapsed(!this.#collapsed));
+
     const count = document.createElement('strong');
     count.textContent = 'No marks yet';
+
     const dismiss = document.createElement('button');
     dismiss.type = 'button';
     dismiss.className = 'ink-dismiss';
     dismiss.textContent = '×';
-    dismiss.title = 'Hide';
+    dismiss.title = 'Hide until the next mark';
     dismiss.addEventListener('click', () => options.onDismiss());
-    header.append(count, dismiss);
+
+    header.append(collapse, count, dismiss);
 
     const list = document.createElement('ul');
     list.className = 'ink-mark-list';
@@ -94,14 +113,45 @@ export class ReviewPanel {
     submit.addEventListener('click', () => options.onSubmit());
 
     actions.append(undo, submit);
-    root.append(header, list, preview, actions);
+
+    // Everything except the header collapses, so the summary stays readable.
+    const body = document.createElement('div');
+    body.className = 'ink-body';
+    body.append(list, preview, actions);
+
+    root.append(header, body);
     options.container.appendChild(root);
 
     this.#root = root;
+    this.#body = body;
+    this.#collapseButton = collapse;
     this.#list = list;
     this.#preview = preview;
     this.#submit = submit;
     this.#count = count;
+
+    this.#setCollapsed(false);
+  }
+
+  /**
+   * Show or hide everything below the header.
+   *
+   * Deliberately NOT reset by `update()`. Re-expanding the panel on every
+   * stroke would make collapsing useless precisely while drawing, which is when
+   * it is wanted.
+   */
+  #setCollapsed(collapsed: boolean): void {
+    this.#collapsed = collapsed;
+    this.#body.hidden = collapsed;
+    this.#root.dataset['collapsed'] = String(collapsed);
+    this.#collapseButton.textContent = collapsed ? '▸' : '▾';
+    this.#collapseButton.setAttribute('aria-expanded', String(!collapsed));
+    this.#collapseButton.title = collapsed ? 'Show the answers' : 'Collapse to the summary';
+  }
+
+  /** Whether the panel is collapsed to its header. */
+  get collapsed(): boolean {
+    return this.#collapsed;
   }
 
   /**
