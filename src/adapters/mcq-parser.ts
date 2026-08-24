@@ -131,6 +131,30 @@ function promptBefore(el: Element, root: Element): string {
   return '';
 }
 
+/**
+ * A stable token per assistant message, so question ids cannot collide.
+ *
+ * The session collects targets from EVERY assistant message on the page. Ask
+ * for a quiz, answer it, then ask for another, and both messages contain a
+ * "1." — which produced the same question id for both. FR-21 then treats them
+ * as one question, so answering Q1 of the new quiz silently erased the Q1
+ * answer from the old one.
+ *
+ * A WeakMap keyed on the element gives each message a stable identity without
+ * writing anything into the host page, and without holding messages alive.
+ */
+const messageTokens = new WeakMap<Element, string>();
+let nextMessageToken = 0;
+
+function tokenFor(message: Element): string {
+  let token = messageTokens.get(message);
+  if (token === undefined) {
+    token = `m${nextMessageToken++}`;
+    messageTokens.set(message, token);
+  }
+  return token;
+}
+
 interface QuestionGroup {
   options: Element[];
   prompt: string;
@@ -221,7 +245,7 @@ export function parseMcqTargets(message: HTMLElement, options: ParseOptions = {}
 
     const numbered = QUESTION_ORDINAL.exec(group.prompt);
     const ordinal = numbered?.[1] === undefined ? index + 1 : Number(numbered[1]);
-    const questionId = `${prefix}-${ordinal}-${index}` as QuestionId;
+    const questionId = `${prefix}-${tokenFor(message)}-${ordinal}-${index}` as QuestionId;
 
     for (const el of group.options) {
       const text = textOf(el);
