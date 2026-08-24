@@ -123,6 +123,8 @@ export class InkCanvas {
   #livePath: SVGPathElement | null = null;
 
   #onReflowHook: (() => void) | null = null;
+  #offsetX = 0;
+  #offsetY = 0;
   #observer: ResizeObserver | null = null;
 
   readonly #onResize = (): void => {
@@ -252,6 +254,23 @@ export class InkCanvas {
     this.drawLive([]);
   }
 
+  /**
+   * Offset the layer by the conversation's own scroll (FR-11).
+   *
+   * The layer sits in the document, so it already moves with window scroll. It
+   * does not move with a chat that scrolls its message area — hence ink that
+   * stays put on screen while the text moves underneath it. Strokes are stored
+   * in content coordinates, so translating the layer by the container's scroll
+   * puts them back over their text.
+   *
+   * One style write per scroll event, and a transform rather than a repaint.
+   */
+  setScrollOffset(x: number, y: number): void {
+    this.#offsetX = x;
+    this.#offsetY = y;
+    this.#layer.style.transform = x === 0 && y === 0 ? '' : `translate(${-x}px, ${-y}px)`;
+  }
+
   /** Stroke ids currently held, so callers can reconcile their own state. */
   strokeIds(): StrokeId[] {
     return this.#entries.map((e) => e.stroke.id);
@@ -329,9 +348,19 @@ export class InkCanvas {
     this.#style(path, state);
   }
 
-  /** Document coordinates of the layer's own top-left corner. */
+  /**
+   * Content coordinates of the layer's own top-left corner.
+   *
+   * `getBoundingClientRect` reports the layer *after* its transform, so the
+   * scroll offset has to be added back. Without that the offset cancels itself
+   * out: every stroke is placed relative to an origin that has already moved by
+   * the same amount, and the ink does not appear to scroll at all.
+   */
   #layerOrigin(): { x: number; y: number } {
     const r = this.#layer.getBoundingClientRect();
-    return { x: r.left + window.scrollX, y: r.top + window.scrollY };
+    return {
+      x: r.left + window.scrollX + this.#offsetX,
+      y: r.top + window.scrollY + this.#offsetY,
+    };
   }
 }

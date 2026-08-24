@@ -13,6 +13,8 @@
 
 import type { Target } from '@core/types';
 
+import type { ScrollOffset } from './scroll';
+
 export interface SiteAdapter {
   /** Stable identifier, e.g. 'deepseek'. Used in logs and settings. */
   readonly id: string;
@@ -36,10 +38,12 @@ export interface SiteAdapter {
    * Spec section 8 flags `A)` vs `A.` vs `(A)` vs `<li>` as all needing
    * handling. Returns [] when the message yields nothing recognisable.
    *
-   * Bounding boxes must be in document coordinates (FR-9) — add scroll offset
-   * to getBoundingClientRect values.
+   * Bounding boxes must be in CONTENT coordinates (FR-9): add the supplied
+   * `scrollOffset` to `getBoundingClientRect` values. The offset is passed in
+   * rather than derived here so that boxes and pen strokes cannot end up in
+   * different spaces — when they did, marks resolved to the wrong option.
    */
-  parseTargets(message: HTMLElement): Target[];
+  parseTargets(message: HTMLElement, scrollOffset: ScrollOffset): Target[];
 
   /**
    * Whether a response is currently streaming.
@@ -49,6 +53,20 @@ export interface SiteAdapter {
    * Return `false` when the site gives no reliable signal.
    */
   isStreaming(): boolean;
+
+  /**
+   * The element that scrolls the conversation, or null when the window does.
+   *
+   * Which element scrolls is host-specific knowledge, so it belongs here
+   * (NFR-10). Most chat sites scroll only the message area, which makes
+   * `window.scrollY` permanently 0 — every coordinate derived from it is then a
+   * viewport coordinate, ink does not follow the text, and target boxes
+   * measured before a scroll no longer describe where their options are.
+   *
+   * `findScrollRoot` in ./scroll.ts is a generic detector suitable for most
+   * implementations.
+   */
+  scrollRoot(): HTMLElement | null;
 
   /** The site's message composer, or null when it cannot be found. */
   composer(): HTMLElement | null;

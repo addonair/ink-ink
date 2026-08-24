@@ -15,6 +15,7 @@
  */
 
 import { parseMcqTargets, parseOptionLabel } from './mcq-parser';
+import { findScrollRoot, type ScrollOffset } from './scroll';
 import type { SiteAdapter } from './types';
 import type { Target } from '@core/types';
 
@@ -203,9 +204,9 @@ export const deepseekAdapter: SiteAdapter = {
     return messagesByStructure();
   },
 
-  parseTargets(message: HTMLElement): Target[] {
+  parseTargets(message: HTMLElement, scrollOffset: ScrollOffset): Target[] {
     try {
-      return parseMcqTargets(message, { idPrefix: 'deepseek' });
+      return parseMcqTargets(message, { idPrefix: 'deepseek', scrollOffset });
     } catch {
       return [];
     }
@@ -213,6 +214,17 @@ export const deepseekAdapter: SiteAdapter = {
 
   isStreaming(): boolean {
     return watcher.streaming;
+  },
+
+  /**
+   * DeepSeek scrolls its message area, not the window, so this must not return
+   * null — coordinates derived from window scroll would all be viewport
+   * coordinates. Detected generically rather than by selector, since a scroll
+   * container is recognisable by behaviour.
+   */
+  scrollRoot(): HTMLElement | null {
+    const messages = this.assistantMessages();
+    return findScrollRoot(messages[0] ?? null);
   },
 
   composer(): HTMLElement | null {

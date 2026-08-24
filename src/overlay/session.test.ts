@@ -15,7 +15,7 @@ import type { SiteAdapter } from '@adapters/types';
 import type { Target } from '@core/types';
 
 import { fixtureAdapter } from '../test-support/fixture-adapter';
-import { buildMcqPage } from '../test-support/mcq-page';
+import { buildMcqPage, optionBounds } from '../test-support/mcq-page';
 import { InkSession } from './session';
 
 const shadowOf = (): ShadowRoot => {
@@ -153,7 +153,8 @@ describe('InkSession', () => {
     let broken = true;
     const flaky: SiteAdapter = {
       ...fixtureAdapter,
-      parseTargets: (message) => (broken ? [] : fixtureAdapter.parseTargets(message)),
+      parseTargets: (message) =>
+        broken ? [] : fixtureAdapter.parseTargets(message, { x: 0, y: 0 }),
     };
     session = new InkSession({ adapter: flaky });
 
@@ -218,6 +219,51 @@ describe('InkSession', () => {
     expect(styles).toContain('.ink-layer');
   });
 
+  it('does not claim pen taps on its own controls', () => {
+    // Input is captured on the document in the capture phase, which runs before
+    // the event reaches its target. Without an exclusion, a pen tap on Undo or
+    // the per-mark × is swallowed and the button never sees it.
+    session = new InkSession({ adapter: fixtureAdapter });
+    toggle().click();
+
+    const tapped = new PointerEvent('pointerdown', {
+      pointerType: 'pen',
+      pointerId: 7,
+      isPrimary: true,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    });
+    const notPrevented = toggle().dispatchEvent(tapped);
+
+    expect(notPrevented).toBe(true);
+    expect(session.markCount).toBe(0);
+  });
+
+  it('lets a pen press Undo (FR-25)', () => {
+    session = new InkSession({ adapter: fixtureAdapter });
+    toggle().click();
+    drawSquare();
+    expect(session.markCount).toBe(1);
+
+    const undo = shadowOf().querySelector<HTMLButtonElement>('.ink-actions button');
+    if (undo === null) throw new Error('no undo button');
+
+    undo.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        pointerType: 'pen',
+        pointerId: 8,
+        isPrimary: true,
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      }),
+    );
+    undo.click();
+
+    expect(session.markCount).toBe(0);
+  });
+
   it('submit() does nothing when no marks are resolved', () => {
     session = new InkSession({ adapter: fixtureAdapter });
 
@@ -242,5 +288,85 @@ describe('InkSession', () => {
 
     // Nothing resolved, so submit short-circuits before touching the adapter.
     expect(session.submit()).toBe(false);
+  });
+});
+
+/**
+ * Chats that scroll their message area rather than the window.
+ *
+ * DeepSeek does this: the sidebar, header and composer stay put while only the
+ * conversation moves. Coordinates built from `window.scrollY` are always
+ * viewport coordinates on such a page, so a target box measured in content
+ * space and a stroke drawn after a scroll stop describing the same place, and
+ * marks come back unresolved.
+ */
+describe('InkSession on an inner-scrolling page', () => {
+  let session: InkSession | null = null;
+  let scroller: HTMLElement;
+
+  const SCROLLED_BY = 60;
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    scroller = document.createElement('div');
+    scroller.style.overflowY = 'auto';
+    document.body.appendChild(scroller);
+    buildMcqPage(document, undefined, scroller);
+  });
+
+  afterEach(() => {
+    session?.destroy();
+    session = null;
+    vi.restoreAllMocks();
+  });
+
+  it('resolves a mark drawn after the message area has scrolled', () => {
+    session = new InkSession({
+      adapter: { ...fixtureAdapter, scrollRoot: () => scroller },
+    });
+    shadowOf().querySelector<HTMLButtonElement>('.ink-toggle')?.click();
+
+    // The message area scrolls; the window does not move at all.
+    scroller.scrollTop = SCROLLED_BY;
+    scroller.dispatchEvent(new Event('scroll'));
+
+    // Option A of question 1 lives at these CONTENT coordinates. After the
+    // scroll it appears that much higher on screen, which is where the pen
+    // actually goes.
+    const box = optionBounds(0, 0);
+    const left = box.x - 10;
+    const right = box.x + box.width + 10;
+    const top = box.y - SCROLLED_BY - 10;
+    const bottom = box.y + box.height - SCROLLED_BY + 10;
+
+    const send = (type: string, x: number, y: number): void => {
+      document.dispatchEvent(
+        new PointerEvent(type, {
+          pointerType: 'pen',
+          pointerId: 21,
+          isPrimary: true,
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+        }),
+      );
+    };
+
+    send('pointerdown', left, top);
+    send('pointermove', right, top);
+    send('pointermove', right, bottom);
+    send('pointermove', left, bottom);
+    send('pointerup', left, top);
+
+    expect(session.markCount).toBe(1);
+
+    // The point of the test: it must RESOLVE. Adding window.scrollY (always 0
+    // here) instead of the container's scroll puts the stroke SCROLLED_BY px
+    // away from the option and nothing overlaps.
+    const states = [...shadowOf().querySelectorAll('.ink-mark-list li')].map((li) =>
+      li.getAttribute('data-state'),
+    );
+    expect(states).toEqual(['resolved']);
   });
 });

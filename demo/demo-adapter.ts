@@ -12,6 +12,7 @@
  */
 
 import { parseMcqTargets } from '@adapters/mcq-parser';
+import { findScrollRoot, type ScrollOffset } from '@adapters/scroll';
 import type { SiteAdapter } from '@adapters/types';
 import type { Target } from '@core/types';
 
@@ -27,8 +28,16 @@ export const demoAdapter: SiteAdapter = {
     return [...document.querySelectorAll<HTMLElement>('[data-role="assistant"]')];
   },
 
-  parseTargets(message: HTMLElement): Target[] {
-    return parseMcqTargets(message, { idPrefix: 'demo' });
+  parseTargets(message: HTMLElement, scrollOffset: ScrollOffset): Target[] {
+    return parseMcqTargets(message, { idPrefix: 'demo', scrollOffset });
+  },
+
+  /**
+   * Detected rather than hard-coded, so the demo behaves like a real site
+   * whether its messages sit in the page or inside a scrolling container.
+   */
+  scrollRoot(): HTMLElement | null {
+    return findScrollRoot(this.assistantMessages()[0] ?? null);
   },
 
   isStreaming(): boolean {

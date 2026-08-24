@@ -60,7 +60,11 @@ export const QUESTIONS: QuestionSpec[] = [
  *
  * Returns the assistant message root.
  */
-export function buildMcqPage(doc: Document, layout: FixtureLayout = DEFAULT_LAYOUT): HTMLElement {
+export function buildMcqPage(
+  doc: Document,
+  layout: FixtureLayout = DEFAULT_LAYOUT,
+  container?: HTMLElement,
+): HTMLElement {
   const message = doc.createElement('div');
   message.setAttribute('data-role', 'assistant');
 
@@ -88,11 +92,11 @@ export function buildMcqPage(doc: Document, layout: FixtureLayout = DEFAULT_LAYO
     y += layout.questionGap;
   });
 
-  doc.body.appendChild(message);
+  (container ?? doc.body).appendChild(message);
 
   const composer = doc.createElement('textarea');
   composer.setAttribute('data-role', 'composer');
-  doc.body.appendChild(composer);
+  (container ?? doc.body).appendChild(composer);
 
   return message;
 }

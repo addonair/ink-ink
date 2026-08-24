@@ -12,6 +12,8 @@
 
 import type { QuestionId, Rect, Target, TargetId } from '@core/types';
 
+import { findScrollRoot, scrollOffsetOf, type ScrollOffset } from './scroll';
+
 /**
  * Option-label formats to try, in order (spec section 8: "Option parsing").
  * Each captures the label in group 1 and the option text in group 2.
@@ -46,12 +48,18 @@ export function parseOptionLabel(text: string): ParsedOption | null {
   return null;
 }
 
-/** Viewport rect to document coordinates (FR-9, FR-16). */
-export function documentRect(el: Element): Rect {
+/**
+ * Viewport rect to content coordinates (FR-9, FR-16).
+ *
+ * `offset` must be the same one the pen samples use, or a box measured at one
+ * scroll position and a stroke drawn at another describe different spaces and
+ * nothing resolves.
+ */
+export function documentRect(el: Element, offset: ScrollOffset): Rect {
   const r = el.getBoundingClientRect();
   return {
-    x: r.left + window.scrollX,
-    y: r.top + window.scrollY,
+    x: r.left + offset.x,
+    y: r.top + offset.y,
     width: r.width,
     height: r.height,
   };
@@ -183,6 +191,16 @@ function groupsOfOptions(root: HTMLElement): QuestionGroup[] {
 export interface ParseOptions {
   /** Prefix for generated ids, so two adapters cannot collide. */
   idPrefix?: string;
+  /**
+   * Scroll offset to convert measurements into content coordinates.
+   *
+   * Defaults to the offset of whatever scrolls this message, detected from the
+   * message element itself. Leaving it to each adapter to remember was a
+   * footgun: the demo adapter did not pass one, so its boxes were in viewport
+   * coordinates while strokes were in content coordinates, and marks resolved
+   * to the wrong option.
+   */
+  scrollOffset?: ScrollOffset;
 }
 
 /**
@@ -193,6 +211,7 @@ export interface ParseOptions {
  */
 export function parseMcqTargets(message: HTMLElement, options: ParseOptions = {}): Target[] {
   const prefix = options.idPrefix ?? 'q';
+  const offset = options.scrollOffset ?? scrollOffsetOf(findScrollRoot(message));
   const targets: Target[] = [];
 
   groupsOfOptions(message).forEach((group, index) => {
@@ -212,7 +231,7 @@ export function parseMcqTargets(message: HTMLElement, options: ParseOptions = {}
       targets.push({
         id: `${questionId}-${parsed.label}` as TargetId,
         kind: 'option',
-        bounds: documentRect(el),
+        bounds: documentRect(el, offset),
         text,
         label: parsed.label,
         questionId,

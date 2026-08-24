@@ -9,6 +9,7 @@
  */
 
 import { OPTION_PATTERNS } from '@adapters/deepseek';
+import type { ScrollOffset } from '@adapters/scroll';
 import type { SiteAdapter } from '@adapters/types';
 import type { QuestionId, Rect, Target, TargetId } from '@core/types';
 
@@ -54,7 +55,9 @@ export const fixtureAdapter: SiteAdapter = {
     return [...document.querySelectorAll<HTMLElement>(SELECTORS.assistantMessage)];
   },
 
-  parseTargets(message: HTMLElement): Target[] {
+  // Geometry comes from explicit data-rect attributes already in content
+  // coordinates, so the offset is deliberately unused here.
+  parseTargets(message: HTMLElement, _scrollOffset: ScrollOffset): Target[] {
     const targets: Target[] = [];
 
     for (const block of message.querySelectorAll<HTMLElement>(SELECTORS.questionBlock)) {
@@ -84,6 +87,11 @@ export const fixtureAdapter: SiteAdapter = {
     }
 
     return targets;
+  },
+
+  /** This page scrolls the window, so there is no inner container. */
+  scrollRoot(): HTMLElement | null {
+    return null;
   },
 
   isStreaming(): boolean {

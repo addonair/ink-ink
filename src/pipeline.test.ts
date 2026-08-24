@@ -100,7 +100,7 @@ describe('pipeline: stroke to composed message', () => {
 
     const [message] = fixtureAdapter.assistantMessages();
     if (message === undefined) throw new Error('fixture produced no assistant message');
-    targets = fixtureAdapter.parseTargets(message);
+    targets = fixtureAdapter.parseTargets(message, { x: window.scrollX, y: window.scrollY });
   });
 
   it('parses every option across all four formats (FR-15, spec section 8)', () => {

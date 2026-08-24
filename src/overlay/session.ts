@@ -10,6 +10,7 @@
  * be read makes the toggle inert; it never throws into the page (NFR-9).
  */
 
+import { describeScrollRoot, scrollOffsetOf, type ScrollOffset } from '@adapters/scroll';
 import type { SiteAdapter } from '@adapters/types';
 import { classifyStroke } from '@core/classify';
 import { resolveStroke } from '@core/resolve';
@@ -35,27 +36,6 @@ const MEASUREMENT_TTL_MS = 500;
 
 const POINTER_KINDS = new Set(['pen', 'touch', 'mouse']);
 
-/**
- * Describe which element actually scrolls, for diagnosis.
- *
- * A chat that scrolls inside its own container rather than the window breaks
- * assumptions about coordinates, so it is worth knowing which case a site is.
- */
-function describeScrollParent(el: Element): string {
-  let node: Element | null = el;
-  while (node !== null && node !== document.body) {
-    const style = getComputedStyle(node);
-    const scrolls = /auto|scroll|overlay/.test(style.overflowY);
-    if (scrolls && node.scrollHeight > node.clientHeight + 1) {
-      return `<${node.tagName.toLowerCase()} class="${node.className}"> (inner container)`;
-    }
-    node = node.parentElement;
-  }
-  return document.documentElement.scrollHeight > window.innerHeight + 1
-    ? 'window (page scrolls normally)'
-    : 'none detected';
-}
-
 function pointerKindOf(event: PointerEvent): PointerKind | null {
   return POINTER_KINDS.has(event.pointerType) ? (event.pointerType as PointerKind) : null;
 }
@@ -75,6 +55,20 @@ export class InkSession {
   #activePointerId: number | null = null;
   #targets: Target[] = [];
   #measuredAt = 0;
+  #scrollRootEl: HTMLElement | null = null;
+  readonly #teardown = new AbortController();
+
+  /**
+   * Mirror the conversation's scroll onto the ink layer.
+   *
+   * Only needed when the chat scrolls its own container; when the window
+   * scrolls, the offset is already reflected in the layer's position and this
+   * resolves to a no-op translate.
+   */
+  readonly #onContentScroll = (): void => {
+    const root = this.#scrollRootEl;
+    this.#canvas.setScrollOffset(root?.scrollLeft ?? 0, root?.scrollTop ?? 0);
+  };
 
   constructor(options: SessionOptions) {
     this.#adapter = options.adapter;
@@ -117,6 +111,7 @@ export class InkSession {
     this.#canvas.onReflow(() => this.#handleReflow());
 
     this.#attachPointerListeners();
+    this.#refreshScrollRoot();
     this.#checkHealth();
   }
 
@@ -167,6 +162,8 @@ export class InkSession {
   }
 
   destroy(): void {
+    this.#teardown.abort();
+    this.#scrollRootEl?.removeEventListener('scroll', this.#onContentScroll);
     this.#canvas.destroy();
     this.#toggle.destroy();
     this.#panel.destroy();
@@ -190,7 +187,11 @@ export class InkSession {
    * press the site's own buttons.
    */
   #attachPointerListeners(): void {
-    const opts = { capture: true } as const;
+    // Every listener is registered against one signal, so destroy() detaches
+    // them all. Without this the listeners outlived the session: a destroyed
+    // session kept claiming pen events on the document, using its own stale
+    // enabled flag and a host element no longer in the page.
+    const opts = { capture: true, signal: this.#teardown.signal } as const;
 
     document.addEventListener(
       'pointerdown',
@@ -255,7 +256,20 @@ export class InkSession {
   /** Whether this event is a pen stroke we should capture (FR-5, FR-6, FR-7). */
   #shouldDraw(event: PointerEvent): boolean {
     const kind = pointerKindOf(event);
-    return kind !== null && shouldCapture(kind, this.#enabled);
+    if (kind === null || !shouldCapture(kind, this.#enabled)) return false;
+
+    /**
+     * Never claim a tap on our own controls.
+     *
+     * Capture-phase listeners on the document run before the event reaches its
+     * target, so without this a pen tap on Undo or the per-mark × was
+     * swallowed and the button never fired. The toggle appeared to work only
+     * because it is pressed while the layer is off, when nothing is claimed.
+     *
+     * `composedPath` includes the shadow host for events inside the shadow
+     * root, so one check covers every control, including ones added later.
+     */
+    return !event.composedPath().includes(this.#hostEl);
   }
 
   /**
@@ -269,7 +283,39 @@ export class InkSession {
     event.stopPropagation();
   }
 
-  /** Viewport event to document coordinates (FR-9). */
+  /**
+   * Scroll offset for converting viewport positions into content coordinates.
+   *
+   * Cached, because resolving it walks the ancestor chain calling
+   * getComputedStyle and this runs on every pointer sample (NFR-4).
+   */
+  #scrollOffset(): ScrollOffset {
+    return scrollOffsetOf(this.#scrollRootEl);
+  }
+
+  /**
+   * Re-detect which element scrolls the conversation, and follow it.
+   *
+   * The ink layer moves with window scroll for free, but not with a container's,
+   * so its scroll has to be mirrored onto the layer.
+   */
+  #refreshScrollRoot(): void {
+    let root: HTMLElement | null;
+    try {
+      root = this.#adapter.scrollRoot();
+    } catch {
+      root = null;
+    }
+
+    if (root === this.#scrollRootEl) return;
+
+    this.#scrollRootEl?.removeEventListener('scroll', this.#onContentScroll);
+    this.#scrollRootEl = root;
+    this.#scrollRootEl?.addEventListener('scroll', this.#onContentScroll, { passive: true });
+    this.#onContentScroll();
+  }
+
+  /** Viewport event to content coordinates (FR-9). */
   #sample(event: PointerEvent | { clientX: number; clientY: number; pressure?: number }): {
     x: number;
     y: number;
@@ -277,9 +323,10 @@ export class InkSession {
     pressure?: number;
   } {
     const pressure = 'pressure' in event ? event.pressure : undefined;
+    const offset = this.#scrollOffset();
     const base = {
-      x: event.clientX + window.scrollX,
-      y: event.clientY + window.scrollY,
+      x: event.clientX + offset.x,
+      y: event.clientY + offset.y,
       t: performance.now(),
     };
     // Pressure is carried when reported and omitted otherwise. It is never used
@@ -324,9 +371,12 @@ export class InkSession {
 
   #measure(): Target[] {
     try {
+      // One offset for both sides. The session owning it is what stops target
+      // boxes and pen strokes drifting into different coordinate spaces.
+      const offset = this.#scrollOffset();
       const targets: Target[] = [];
       for (const message of this.#adapter.assistantMessages()) {
-        targets.push(...this.#adapter.parseTargets(message));
+        targets.push(...this.#adapter.parseTargets(message, offset));
       }
       return targets;
     } catch {
@@ -361,6 +411,7 @@ export class InkSession {
     }
 
     // Measure on activation so the first stroke is not the one paying for it.
+    this.#refreshScrollRoot();
     this.#measuredAt = 0;
     this.#targetsNow();
 
@@ -404,6 +455,7 @@ export class InkSession {
    * visible ink behind them.
    */
   #handleReflow(): void {
+    this.#refreshScrollRoot();
     this.#measuredAt = 0;
     const targets = this.#targetsNow();
 
@@ -464,7 +516,7 @@ export class InkSession {
         lines.push('last message HTML (1200 chars):', first.innerHTML.slice(0, 1200));
       }
 
-      lines.push(`scroll container: ${describeScrollParent(messages[0] ?? document.body)}`);
+      lines.push(`scroll container: ${describeScrollRoot(this.#scrollRootEl)}`);
 
       console.warn(`[ink-ink] diagnosis\n${lines.join('\n')}`);
     } catch (error) {

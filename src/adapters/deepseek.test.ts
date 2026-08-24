@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { __stopStreamWatcher, deepseekAdapter } from './deepseek';
 import { parseMcqTargets, parseOptionLabel } from './mcq-parser';
+import { scrollOffsetOf } from './scroll';
+
+/** This fixture page scrolls the window, so the offset is the window's. */
+const OFFSET = (): { x: number; y: number } => scrollOffsetOf(null);
 
 /**
  * jsdom does not lay out, so every rect is zero. Stub it with a synthetic
@@ -92,7 +96,11 @@ describe('assistantMessages', () => {
     const found = deepseekAdapter.assistantMessages();
     expect(found.length).toBeGreaterThan(0);
     stubLayout();
-    expect(deepseekAdapter.parseTargets(found[0]!).map((t) => t.label)).toEqual(['A', 'B', 'C']);
+    expect(deepseekAdapter.parseTargets(found[0]!, OFFSET()).map((t) => t.label)).toEqual([
+      'A',
+      'B',
+      'C',
+    ]);
   });
 
   it('does not treat composer contents as a message', () => {
@@ -124,13 +132,13 @@ describe('parseTargets', () => {
   });
 
   it('parses "A)" / "A." / "(A)" / list-item option formats', () => {
-    const targets = deepseekAdapter.parseTargets(message());
+    const targets = deepseekAdapter.parseTargets(message(), OFFSET());
     expect(targets).toHaveLength(9);
     expect(targets.map((t) => t.label)).toEqual(['A', 'B', 'C', 'A', 'B', 'C', 'A', 'B', 'C']);
   });
 
   it('groups options under their question via questionId (FR-21)', () => {
-    const targets = deepseekAdapter.parseTargets(message());
+    const targets = deepseekAdapter.parseTargets(message(), OFFSET());
     const groups = new Set(targets.map((t) => t.questionId));
 
     expect(groups.size).toBe(3);
@@ -141,16 +149,16 @@ describe('parseTargets', () => {
   });
 
   it('numbers questions from the prompt text, not just position', () => {
-    const targets = deepseekAdapter.parseTargets(message());
+    const targets = deepseekAdapter.parseTargets(message(), OFFSET());
     expect([...new Set(targets.map((t) => t.ordinal))]).toEqual([1, 2, 3]);
   });
 
   it('reports bounds in document coordinates, not viewport (FR-9)', () => {
-    const atTop = deepseekAdapter.parseTargets(message());
+    const atTop = deepseekAdapter.parseTargets(message(), OFFSET());
 
     // Scroll down; viewport rects shift up, but document coordinates must not.
     stubLayout(500);
-    const scrolled = deepseekAdapter.parseTargets(message());
+    const scrolled = deepseekAdapter.parseTargets(message(), OFFSET());
 
     expect(scrolled.map((t) => t.bounds.y)).toEqual(atTop.map((t) => t.bounds.y));
   });
@@ -158,7 +166,7 @@ describe('parseTargets', () => {
   it('measures each option line, not the list wrapping them', () => {
     // A wrapper-sized box would overlap every option and make every circle
     // ambiguous.
-    const targets = deepseekAdapter.parseTargets(message());
+    const targets = deepseekAdapter.parseTargets(message(), OFFSET());
     for (const t of targets) {
       expect(t.bounds.height).toBe(20);
     }
@@ -171,13 +179,13 @@ describe('parseTargets', () => {
       </div>`;
     stubLayout();
 
-    expect(deepseekAdapter.parseTargets(message())).toEqual([]);
+    expect(deepseekAdapter.parseTargets(message(), OFFSET())).toEqual([]);
   });
 
   it('returns an empty array rather than throwing on unparseable markup (NFR-9)', () => {
     document.body.innerHTML = '<div data-message-author-role="assistant"></div>';
-    expect(() => deepseekAdapter.parseTargets(message())).not.toThrow();
-    expect(deepseekAdapter.parseTargets(message())).toEqual([]);
+    expect(() => deepseekAdapter.parseTargets(message(), OFFSET())).not.toThrow();
+    expect(deepseekAdapter.parseTargets(message(), OFFSET())).toEqual([]);
   });
 });
 
