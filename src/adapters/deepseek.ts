@@ -184,7 +184,10 @@ export const deepseekAdapter: SiteAdapter = {
   label: 'DeepSeek',
 
   matches(url: URL): boolean {
-    return url.hostname === 'chat.deepseek.com';
+    // Any deepseek.com subdomain, not just `chat.`. Pinning the exact
+    // subdomain meant a wrong guess produced no UI at all and no clue why.
+    const host = url.hostname.toLowerCase();
+    return host === 'deepseek.com' || host.endsWith('.deepseek.com');
   },
 
   assistantMessages(): HTMLElement[] {

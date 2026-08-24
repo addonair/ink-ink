@@ -18,12 +18,18 @@ const STORAGE_KEY = 'trailingInstruction';
 let session: InkSession | null = null;
 
 function bootstrap(): void {
-  const adapter = adapterFor(new URL(window.location.href));
+  const url = new URL(window.location.href);
+  const adapter = adapterFor(url);
 
-  if (adapter === null) {
-    // Injected on a host with no adapter. Nothing to do — stay inert (NFR-9).
-    return;
-  }
+  // Announce injection unconditionally. Without this, "no toggle appeared" is
+  // ambiguous between the script never running and the script running but
+  // finding no adapter — two very different problems, and the console is the
+  // only way to tell them apart from the outside.
+  console.warn(
+    `${LOG_PREFIX} injected on ${url.hostname}; adapter: ${adapter?.id ?? 'none (staying inert)'}`,
+  );
+
+  if (adapter === null) return; // NFR-9
 
   mount(adapter);
 }

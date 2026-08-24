@@ -17,14 +17,24 @@ describe('adapterFor', () => {
     expect(adapterFor(new URL('https://example.com/chat'))).toBeNull();
   });
 
-  it('matches the DeepSeek host', () => {
-    const adapter = adapterFor(new URL('https://chat.deepseek.com/a/chat/s/123'));
-    expect(adapter?.id).toBe('deepseek');
+  it('matches any deepseek.com subdomain, not just chat.', () => {
+    // Pinning the exact subdomain meant a wrong guess produced no UI at all.
+    for (const url of [
+      'https://chat.deepseek.com/a/chat/s/123',
+      'https://www.deepseek.com/chat',
+      'https://deepseek.com/',
+    ]) {
+      expect(adapterFor(new URL(url))?.id).toBe('deepseek');
+    }
   });
 
   it('does not match a lookalike hostname', () => {
+    // Suffix matching must not be a substring match: an attacker-controlled
+    // host ending in something similar must not qualify.
     expect(adapterFor(new URL('https://chat.deepseek.com.evil.test/'))).toBeNull();
     expect(adapterFor(new URL('https://notdeepseek.com/'))).toBeNull();
+    expect(adapterFor(new URL('https://fakedeepseek.com/'))).toBeNull();
+    expect(adapterFor(new URL('https://deepseek.com.attacker.io/'))).toBeNull();
   });
 
   it('survives an adapter whose matcher throws', () => {

@@ -12,7 +12,14 @@ import pkg from './package.json' with { type: 'json' };
  * TODO(verify): confirm these patterns against a live DeepSeek session before
  * the first real release. Spec section 8 flags host markup as the top risk.
  */
-export const HOST_MATCHES = ['https://chat.deepseek.com/*'] as const;
+export const HOST_MATCHES = [
+  // Both forms are needed: `*.deepseek.com` does not match the bare domain.
+  // Kept to one company's domain, so this is still a narrow allowlist (NFR-6),
+  // but wide enough that guessing the exact chat subdomain is not a
+  // prerequisite for the extension loading at all.
+  'https://deepseek.com/*',
+  'https://*.deepseek.com/*',
+] as const;
 
 export default defineManifest({
   manifest_version: 3,
