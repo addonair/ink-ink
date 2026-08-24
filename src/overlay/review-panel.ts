@@ -19,6 +19,12 @@ export interface ReviewPanelOptions {
   onDismiss(): void;
 }
 
+/** The question a mark answers, or null when it resolves to nothing. */
+function ordinalOf(mark: Mark): number | null {
+  if (mark.resolution.status !== 'resolved') return null;
+  return mark.resolution.target.ordinal ?? null;
+}
+
 const REASON_TEXT: Record<string, string> = {
   'no-targets': 'nothing recognisable underneath',
   'below-threshold': 'not clearly over an option',
@@ -86,6 +92,30 @@ export class ReviewPanel {
     this.#count = count;
   }
 
+  /**
+   * Order marks for display: by question number, not by the order drawn.
+   *
+   * Someone who answers 3, 4, then 1 should still read 1, 2, 3, 4 down the
+   * panel — it is an answer sheet, and the composed message is already ordered
+   * this way. Showing draw order made the panel and the outgoing text disagree.
+   *
+   * Unresolved marks have no question, so they sit at the end rather than
+   * interrupting the numbered run.
+   */
+  static #forDisplay(marks: readonly Mark[]): Mark[] {
+    return marks
+      .map((mark, index) => ({ mark, index }))
+      .sort((a, b) => {
+        const ao = ordinalOf(a.mark);
+        const bo = ordinalOf(b.mark);
+        if (ao === bo) return a.index - b.index;
+        if (ao === null) return 1;
+        if (bo === null) return -1;
+        return ao - bo;
+      })
+      .map((entry) => entry.mark);
+  }
+
   /** Re-render from the current mark set (FR-23). */
   update(marks: readonly Mark[]): void {
     this.#list.replaceChildren();
@@ -98,7 +128,7 @@ export class ReviewPanel {
             marks.length === 1 ? '' : 's'
           }`;
 
-    for (const mark of marks) {
+    for (const mark of ReviewPanel.#forDisplay(marks)) {
       this.#list.appendChild(this.#row(mark));
     }
 

@@ -25,10 +25,15 @@
   color: #111827;
 }
 
-.ink-canvas {
+/*
+ * The input surface. Fixed to the viewport, never painted on. Only this
+ * element receives pointer events.
+ */
+.ink-surface {
   position: fixed;
   inset: 0;
   z-index: 2147483000;
+
   /* FR-3: the layer intercepts nothing until it is explicitly enabled. */
   pointer-events: none;
 
@@ -41,11 +46,11 @@
    * through and vanishes. A drawing surface has to own its gestures outright.
    *
    * This only applies while the layer is enabled — when it is off,
-   * `pointer-events: none` makes the canvas transparent to input and normal
+   * `pointer-events: none` makes the surface transparent to input and normal
    * scrolling is unaffected (FR-3).
    *
    * Tradeoff against US-8, which wants finger-scroll while the pen is active:
-   * with the layer on, touch over the canvas no longer scrolls the page. The
+   * with the layer on, touch over the surface no longer scrolls the page. The
    * target hardware reports `maxTouchPoints: 0` and has no touch input at all
    * (see .claude/knowledge/target-hardware.md), so nothing is lost there. If
    * this is ever run on a real touchscreen, US-8 needs revisiting — but a pen
@@ -56,6 +61,28 @@
   /* Stop pen drags from turning into text selection on the page beneath. */
   user-select: none;
   -webkit-user-select: none;
+}
+
+/*
+ * The ink itself, positioned IN the page rather than over the viewport, so the
+ * browser scrolls it alongside the text (FR-11). Zero-sized and absolutely
+ * positioned, so it adds nothing to the page's scrollable area; each stroke is
+ * its own absolutely positioned child.
+ */
+.ink-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+}
+
+.ink-stroke {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
 }
 
 /* NFR-12: mode is visible at all times, without covering content. */

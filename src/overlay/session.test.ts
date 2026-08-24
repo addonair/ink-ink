@@ -3,9 +3,10 @@
 /**
  * Session wiring tests.
  *
- * jsdom has no canvas, so the 2D context is stubbed — these cover the wiring
- * and state transitions, not the rendering. Painting and scroll anchoring are
- * verified by driving a real browser against the demo page instead.
+ * These cover wiring and state transitions, not rendering. Ink is drawn as SVG
+ * positioned in the page; that it actually paints, scrolls with the content,
+ * and re-anchors on reflow is verified by driving a real browser against the
+ * demo page instead.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,28 +17,6 @@ import type { Target } from '@core/types';
 import { fixtureAdapter } from '../test-support/fixture-adapter';
 import { buildMcqPage } from '../test-support/mcq-page';
 import { InkSession } from './session';
-
-function stubCanvas(): void {
-  const ctx = {
-    setTransform: vi.fn(),
-    clearRect: vi.fn(),
-    beginPath: vi.fn(),
-    moveTo: vi.fn(),
-    lineTo: vi.fn(),
-    stroke: vi.fn(),
-    arc: vi.fn(),
-    fill: vi.fn(),
-    setLineDash: vi.fn(),
-    strokeStyle: '',
-    fillStyle: '',
-    lineWidth: 0,
-    lineCap: '',
-    lineJoin: '',
-  };
-  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
-    ctx as unknown as CanvasRenderingContext2D,
-  );
-}
 
 const shadowOf = (): ShadowRoot => {
   const host = document.querySelector('[data-ink-ink]');
@@ -58,7 +37,6 @@ describe('InkSession', () => {
   let session: InkSession | null = null;
 
   beforeEach(() => {
-    stubCanvas();
     document.body.innerHTML = '';
     buildMcqPage(document);
   });
@@ -72,7 +50,7 @@ describe('InkSession', () => {
   it('mounts inside a shadow root so host styles are untouched (NFR-11)', () => {
     session = new InkSession({ adapter: fixtureAdapter });
 
-    expect(shadowOf().querySelector('.ink-canvas')).not.toBeNull();
+    expect(shadowOf().querySelector('.ink-surface')).not.toBeNull();
     expect(shadowOf().querySelector('style')?.textContent).toContain('.ink-toggle');
     // Nothing of ours in the light DOM beyond the single host element.
     expect(document.querySelectorAll('.ink-toggle')).toHaveLength(0);
@@ -83,7 +61,7 @@ describe('InkSession', () => {
 
     expect(toggle().textContent).toBe('Pen off');
     expect(toggle().getAttribute('aria-pressed')).toBe('false');
-    expect(shadowOf().querySelector<HTMLElement>('.ink-canvas')?.style.pointerEvents).toBe('none');
+    expect(shadowOf().querySelector<HTMLElement>('.ink-surface')?.style.pointerEvents).toBe('none');
   });
 
   it('enables interception only once toggled on (FR-2)', () => {
@@ -91,7 +69,7 @@ describe('InkSession', () => {
     toggle().click();
 
     expect(toggle().textContent).toBe('Pen on');
-    expect(shadowOf().querySelector<HTMLElement>('.ink-canvas')?.style.pointerEvents).toBe('auto');
+    expect(shadowOf().querySelector<HTMLElement>('.ink-surface')?.style.pointerEvents).toBe('auto');
   });
 
   it('does not report a healthy page as broken', () => {
@@ -143,11 +121,11 @@ describe('InkSession', () => {
     session = new InkSession({ adapter: fixtureAdapter });
     toggle().click();
 
-    const canvas = shadowOf().querySelector<HTMLCanvasElement>('.ink-canvas');
-    if (canvas === null) throw new Error('no canvas');
+    const surface = shadowOf().querySelector<HTMLElement>('.ink-surface');
+    if (surface === null) throw new Error('no input surface');
 
     const send = (type: string, x: number, y: number): void => {
-      canvas.dispatchEvent(
+      surface.dispatchEvent(
         new PointerEvent(type, {
           pointerType: 'pen',
           pointerId: 3,
@@ -167,6 +145,42 @@ describe('InkSession', () => {
 
     // The stroke survived and became a mark, resolved or not.
     expect(session.markCount).toBe(1);
+  });
+
+  it('renders committed ink into the page layer, not a viewport canvas', () => {
+    // FR-11: ink positioned in the page scrolls with the content by the same
+    // mechanism as the text, so there is no scroll handler to lag behind.
+    session = new InkSession({ adapter: fixtureAdapter });
+    toggle().click();
+
+    const surface = shadowOf().querySelector<HTMLElement>('.ink-surface');
+    if (surface === null) throw new Error('no input surface');
+
+    const send = (type: string, x: number, y: number): void => {
+      surface.dispatchEvent(
+        new PointerEvent(type, {
+          pointerType: 'pen',
+          pointerId: 5,
+          isPrimary: true,
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+        }),
+      );
+    };
+
+    send('pointerdown', 100, 100);
+    send('pointermove', 160, 100);
+    send('pointermove', 160, 160);
+    send('pointerup', 100, 100);
+
+    const layer = shadowOf().querySelector('.ink-layer');
+    expect(layer?.querySelectorAll('svg.ink-stroke').length).toBe(1);
+
+    // The layer itself takes up no space, so it cannot extend the page.
+    const styles = shadowOf().querySelector('style')?.textContent ?? '';
+    expect(styles).toContain('.ink-layer');
   });
 
   it('submit() does nothing when no marks are resolved', () => {

@@ -98,6 +98,9 @@ export default tseslint.config(
     rules: {
       'no-restricted-globals': 'off',
       'no-restricted-imports': 'off',
+      // Tests legitimately query the DOM they just built, including the
+      // overlay's own elements. The host-selector rule is for production code.
+      'no-restricted-syntax': 'off',
     },
   },
 
