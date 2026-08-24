@@ -18,6 +18,14 @@ export const DEFAULT_TRAILING_INSTRUCTION = 'Mark these and explain any I got wr
 
 export interface ComposeOptions {
   trailingInstruction: string;
+  /**
+   * Question numbers the user asked to have explained.
+   *
+   * Separate from the answers, because a question can be flagged without being
+   * answered — not understanding a question is a common reason for leaving it
+   * blank, which is exactly when an explanation is wanted.
+   */
+  explainOrdinals?: readonly number[];
 }
 
 /** The resolved targets, in the order they should be listed. */
@@ -59,9 +67,40 @@ function answeredTargets(marks: readonly Mark[]): Target[] {
  *
  * Only resolved marks are included (FR-20).
  */
+/** "2", "2 and 4", "2, 4 and 7" — read aloud rather than comma-spliced. */
+function listNumbers(numbers: readonly number[]): string {
+  if (numbers.length === 1) return String(numbers[0]);
+  const head = numbers.slice(0, -1).join(', ');
+  return `${head} and ${numbers[numbers.length - 1]}`;
+}
+
+/**
+ * The request to explain flagged questions.
+ *
+ * Deliberately asks for an explanation **even when the answer was right**: a
+ * lucky guess is precisely the case where the student needs it, and the default
+ * trailing instruction only covers what they got wrong.
+ */
+function explainParagraph(ordinals: readonly number[]): string {
+  const sorted = [...new Set(ordinals)].sort((a, b) => a - b);
+  if (sorted.length === 0) return '';
+
+  const subject = sorted.length === 1 ? 'question' : 'questions';
+  return (
+    `I'm not confident about ${subject} ${listNumbers(sorted)} — please explain ` +
+    `${sorted.length === 1 ? 'it' : 'those'} in full, including what the question ` +
+    'is asking and why the correct answer is right, even if I answered correctly.'
+  );
+}
+
 export function composeAnswerMessage(marks: readonly Mark[], options: ComposeOptions): string {
   const targets = answeredTargets(marks);
-  if (targets.length === 0) return '';
+  const explain = explainParagraph(options.explainOrdinals ?? []);
+
+  // Only truly nothing to say is empty. Flags without answers are a real
+  // message — "I could not answer these, please explain them" — and returning
+  // '' for that silently discarded it.
+  if (targets.length === 0 && explain === '') return '';
 
   const lines = targets.map((target, i) => {
     const number = target.ordinal ?? i + 1;
@@ -71,10 +110,17 @@ export function composeAnswerMessage(marks: readonly Mark[], options: ComposeOpt
     return `${number}. ${answer}`;
   });
 
-  const body = `My answers:\n${lines.join('\n')}`;
-  const instruction = options.trailingInstruction.trim();
+  const parts: string[] = [];
+  if (targets.length > 0) parts.push(`My answers:\n${lines.join('\n')}`);
 
-  return instruction === '' ? body : `${body}\n\n${instruction}`;
+  // The trailing instruction says "mark these", so it only makes sense when
+  // there are answers to mark. A flags-only message carries its own request.
+  const instruction = options.trailingInstruction.trim();
+  if (instruction !== '' && targets.length > 0) parts.push(instruction);
+
+  if (explain !== '') parts.push(explain);
+
+  return parts.join('\n\n');
 }
 
 /**

@@ -264,6 +264,78 @@ describe('InkSession', () => {
     expect(session.markCount).toBe(0);
   });
 
+  /**
+   * Flagging a question for explanation.
+   *
+   * Keyed by question rather than by mark, because the flag has to survive
+   * changing the answer and has to exist with no answer at all.
+   */
+  describe('flagging a question to be explained', () => {
+    const flagButtons = (): HTMLButtonElement[] => [
+      ...shadowOf().querySelectorAll<HTMLButtonElement>('.ink-flag'),
+    ];
+
+    function circle(question: number, option: number): void {
+      const box = optionBounds(question, option);
+      sendPen('pointerdown', box.x - 8, box.y - 8);
+      sendPen('pointermove', box.x + box.width + 8, box.y - 8);
+      sendPen('pointermove', box.x + box.width + 8, box.y + box.height + 8);
+      sendPen('pointermove', box.x - 8, box.y + box.height + 8);
+      sendPen('pointerup', box.x - 8, box.y - 8);
+    }
+
+    beforeEach(() => {
+      session = new InkSession({ adapter: fixtureAdapter });
+      toggle().click();
+    });
+
+    it('lists every question, answered or not, so an unanswered one can be flagged', () => {
+      // The fixture has three questions and nothing is marked yet.
+      expect(flagButtons()).toHaveLength(3);
+    });
+
+    it('includes a flagged unanswered question in the message', () => {
+      flagButtons()[1]?.click();
+
+      const text = session!.previewText();
+      expect(text).not.toContain('My answers:');
+      expect(text).toContain('question 2');
+    });
+
+    it('keeps the flag when the answer for that question changes (FR-21)', () => {
+      circle(0, 0); // answer question 1 with A
+      flagButtons()[0]?.click();
+      expect(session!.previewText()).toContain('question 1');
+
+      circle(0, 2); // change the answer to C; FR-21 replaces the mark
+      expect(session!.markCount).toBe(1);
+
+      // Changing your mind about the answer does not mean you now understand
+      // the question.
+      const text = session!.previewText();
+      expect(text).toContain('1. C');
+      expect(text).toContain('question 1');
+    });
+
+    it('clears flags on a successful submit, like marks', async () => {
+      circle(0, 0);
+      flagButtons()[0]?.click();
+      expect(session!.previewText()).toContain('question 1');
+
+      await expect(session!.submit()).resolves.toBe('inserted');
+
+      expect(session!.markCount).toBe(0);
+      expect(session!.previewText()).toBe('');
+    });
+
+    it('can submit with only flags and no answers', () => {
+      flagButtons()[0]?.click();
+
+      const submit = shadowOf().querySelector<HTMLButtonElement>('.ink-submit');
+      expect(submit?.disabled).toBe(false);
+    });
+  });
+
   it('submit() does nothing when no marks are resolved', async () => {
     session = new InkSession({ adapter: fixtureAdapter });
 
@@ -415,9 +487,13 @@ describe('InkSession on an inner-scrolling page', () => {
     // The point of the test: it must RESOLVE. Adding window.scrollY (always 0
     // here) instead of the container's scroll puts the stroke SCROLLED_BY px
     // away from the option and nothing overlaps.
+    //
+    // The panel lists every question now, answered or not, so this asserts on
+    // the outcome rather than on how many rows there are.
     const states = [...shadowOf().querySelectorAll('.ink-mark-list li')].map((li) =>
       li.getAttribute('data-state'),
     );
-    expect(states).toEqual(['resolved']);
+    expect(states).toContain('resolved');
+    expect(states).not.toContain('unresolved');
   });
 });

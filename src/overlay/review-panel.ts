@@ -8,21 +8,33 @@
  * NFR-13: dismissible, and never blocking the conversation.
  */
 
-import type { Mark, StrokeId } from '@core/types';
+import type { Mark, QuestionId, StrokeId } from '@core/types';
+
+/**
+ * One question found on the page, with whatever the user did about it.
+ *
+ * The panel lists questions rather than marks so a question can be flagged for
+ * explanation without being answered — which is the common case, since not
+ * understanding a question is a good reason to leave it blank.
+ */
+export interface QuestionRow {
+  questionId: QuestionId;
+  ordinal: number;
+  /** The chosen option's label, or null when unanswered. */
+  answer: string | null;
+  /** The stroke to erase when clearing this answer, if there is one. */
+  strokeId: StrokeId | null;
+  flagged: boolean;
+}
 
 export interface ReviewPanelOptions {
   container: HTMLElement;
   onRemoveMark(strokeId: StrokeId): void;
+  onToggleFlag(questionId: QuestionId): void;
   onUndo(): void;
   /** FR-27: this hands text to the composer. It never sends. */
   onSubmit(): void;
   onDismiss(): void;
-}
-
-/** The question a mark answers, or null when it resolves to nothing. */
-function ordinalOf(mark: Mark): number | null {
-  if (mark.resolution.status !== 'resolved') return null;
-  return mark.resolution.target.ordinal ?? null;
 }
 
 const REASON_TEXT: Record<string, string> = {
@@ -93,47 +105,36 @@ export class ReviewPanel {
   }
 
   /**
-   * Order marks for display: by question number, not by the order drawn.
+   * Re-render from the questions on the page and any ink that resolved to
+   * nothing (FR-23).
    *
-   * Someone who answers 3, 4, then 1 should still read 1, 2, 3, 4 down the
-   * panel — it is an answer sheet, and the composed message is already ordered
-   * this way. Showing draw order made the panel and the outgoing text disagree.
-   *
-   * Unresolved marks have no question, so they sit at the end rather than
-   * interrupting the numbered run.
+   * Questions are listed whether or not they were answered, so an unanswered
+   * one can still be flagged. Unresolved marks keep their own rows because
+   * FR-13 and FR-20 require ink that landed on nothing to be visible and
+   * excluded from the message.
    */
-  static #forDisplay(marks: readonly Mark[]): Mark[] {
-    return marks
-      .map((mark, index) => ({ mark, index }))
-      .sort((a, b) => {
-        const ao = ordinalOf(a.mark);
-        const bo = ordinalOf(b.mark);
-        if (ao === bo) return a.index - b.index;
-        if (ao === null) return 1;
-        if (bo === null) return -1;
-        return ao - bo;
-      })
-      .map((entry) => entry.mark);
-  }
-
-  /** Re-render from the current mark set (FR-23). */
-  update(marks: readonly Mark[]): void {
+  update(questions: readonly QuestionRow[], unresolved: readonly Mark[]): void {
     this.#list.replaceChildren();
 
-    const resolved = marks.filter((m) => m.resolution.status === 'resolved');
-    this.#count.textContent =
-      marks.length === 0
-        ? 'No marks yet'
-        : `${resolved.length} answer${resolved.length === 1 ? '' : 's'} of ${marks.length} mark${
-            marks.length === 1 ? '' : 's'
-          }`;
+    const answered = questions.filter((q) => q.answer !== null).length;
+    const flagged = questions.filter((q) => q.flagged).length;
 
-    for (const mark of ReviewPanel.#forDisplay(marks)) {
-      this.#list.appendChild(this.#row(mark));
+    this.#count.textContent =
+      questions.length === 0
+        ? 'No questions found'
+        : `${answered} of ${questions.length} answered` +
+          (flagged > 0 ? `, ${flagged} to explain` : '');
+
+    for (const question of [...questions].sort((a, b) => a.ordinal - b.ordinal)) {
+      this.#list.appendChild(this.#questionRow(question));
+    }
+    for (const mark of unresolved) {
+      this.#list.appendChild(this.#unresolvedRow(mark));
     }
 
-    this.#submit.disabled = resolved.length === 0;
-    if (marks.length > 0) this.show();
+    // Flags alone are worth sending: "I could not answer these, explain them".
+    this.#submit.disabled = answered === 0 && flagged === 0;
+    if (questions.length > 0 || unresolved.length > 0) this.show();
   }
 
   /** Show the exact text that will be inserted, so US-6 is actually served. */
@@ -172,21 +173,55 @@ export class ReviewPanel {
     this.#root.remove();
   }
 
-  #row(mark: Mark): HTMLLIElement {
+  #questionRow(question: QuestionRow): HTMLLIElement {
     const li = document.createElement('li');
-    const resolved = mark.resolution.status === 'resolved';
-    li.dataset['state'] = resolved ? 'resolved' : 'unresolved';
+    li.dataset['state'] = question.answer === null ? 'unanswered' : 'resolved';
+    if (question.flagged) li.dataset['flagged'] = 'true';
 
     const text = document.createElement('span');
-    if (mark.resolution.status === 'resolved') {
-      const t = mark.resolution.target;
-      const number = t.ordinal === undefined ? '' : `${t.ordinal}. `;
-      text.textContent = `${number}${t.label ?? t.text}`;
-    } else {
-      const why = REASON_TEXT[mark.resolution.reason] ?? mark.resolution.reason;
-      // FR-20: say why it will not be sent, rather than showing it as an answer.
-      text.textContent = `Unresolved — ${why}`;
+    text.textContent =
+      question.answer === null
+        ? `${question.ordinal}. not answered`
+        : `${question.ordinal}. ${question.answer}`;
+
+    const flag = document.createElement('button');
+    flag.type = 'button';
+    flag.className = 'ink-flag';
+    flag.textContent = '?';
+    flag.setAttribute('aria-pressed', String(question.flagged));
+    flag.title = question.flagged
+      ? 'Remove the request to explain this question'
+      : 'Ask for this question to be explained';
+    flag.addEventListener('click', () => this.#options.onToggleFlag(question.questionId));
+
+    li.append(text, flag);
+
+    // Only an answered question has ink to clear (FR-24).
+    if (question.strokeId !== null) {
+      const strokeId = question.strokeId;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'ink-remove';
+      remove.textContent = '×';
+      remove.title = 'Remove this answer';
+      remove.addEventListener('click', () => this.#options.onRemoveMark(strokeId));
+      li.append(remove);
     }
+
+    return li;
+  }
+
+  /** Ink that resolved to nothing (FR-13, FR-20). */
+  #unresolvedRow(mark: Mark): HTMLLIElement {
+    const li = document.createElement('li');
+    li.dataset['state'] = 'unresolved';
+
+    const text = document.createElement('span');
+    const why =
+      mark.resolution.status === 'unresolved'
+        ? (REASON_TEXT[mark.resolution.reason] ?? mark.resolution.reason)
+        : '';
+    text.textContent = `Unresolved — ${why}`;
 
     const remove = document.createElement('button');
     remove.type = 'button';

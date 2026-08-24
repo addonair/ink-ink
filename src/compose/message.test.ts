@@ -88,6 +88,45 @@ describe('composeAnswerMessage (FR-26, spec 5.6)', () => {
   });
 });
 
+describe('questions flagged for explanation', () => {
+  beforeEach(resetTestIds);
+
+  it('appends a request naming the flagged questions', () => {
+    const marks = [resolvedMark(opt('B', 1)), resolvedMark(opt('C', 2))];
+    const out = composeAnswerMessage(marks, { ...DEFAULTS, explainOrdinals: [2] });
+
+    expect(out).toContain(['My answers:', '1. B', '2. C'].join('\n'));
+    // The user's own trailing instruction is left untouched.
+    expect(out).toContain('Mark these and explain any I got wrong.');
+    expect(out).toContain('question 2');
+    // Asking even when correct is the point: a lucky guess is exactly when the
+    // explanation is needed.
+    expect(out).toMatch(/even if/i);
+  });
+
+  it('lists several flagged questions in order', () => {
+    const marks = [resolvedMark(opt('A', 1)), resolvedMark(opt('B', 2))];
+    const out = composeAnswerMessage(marks, { ...DEFAULTS, explainOrdinals: [4, 2] });
+
+    expect(out).toContain('questions 2 and 4');
+  });
+
+  it('still composes a message when nothing was answered', () => {
+    // "I could not answer any of these, please explain them" is a reasonable
+    // thing to send, and used to be silently discarded because the composer
+    // bailed as soon as there were no answered targets.
+    const out = composeAnswerMessage([], { ...DEFAULTS, explainOrdinals: [1, 3] });
+
+    expect(out).not.toBe('');
+    expect(out).not.toContain('My answers:');
+    expect(out).toContain('questions 1 and 3');
+  });
+
+  it('returns an empty string with neither answers nor flags', () => {
+    expect(composeAnswerMessage([], { ...DEFAULTS, explainOrdinals: [] })).toBe('');
+  });
+});
+
 describe('composeReferenceMessage (FR-28, deferred US-7)', () => {
   it('quotes the marked passage above the typed question', () => {
     expect(composeReferenceMessage('The mitochondrion is the powerhouse.', 'Why?')).toBe(

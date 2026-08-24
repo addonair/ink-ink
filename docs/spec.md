@@ -99,6 +99,10 @@ can catch a mis-resolved mark before wasting a turn.
 **US-7** — As a reader, I want to circle a sentence in a response and type a
 follow-up, so that the model knows exactly which part I mean without me quoting it.
 
+**US-11** — As a student, I want to mark a question as one I don't understand —
+whether or not I answered it — so that the response explains that question and
+its answer rather than only telling me whether I was right.
+
 ### Supporting
 
 **US-8** — As a user, I want to scroll the conversation normally with my finger

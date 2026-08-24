@@ -152,6 +152,47 @@
   font-style: italic;
 }
 
+/*
+ * Unanswered questions are listed so they can be flagged, but muted — on a
+ * twenty-question set the answered ones still have to stand out at a glance.
+ */
+.ink-mark-list li[data-state='unanswered'] span {
+  color: #9ca3af;
+}
+
+.ink-flag {
+  font: inherit;
+  line-height: 1;
+  padding: 2px 7px;
+  margin-left: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+.ink-flag:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+/* A flagged question is going to change the outgoing message, so it says so. */
+.ink-mark-list li[data-flagged='true'] .ink-flag {
+  background: #f59e0b;
+  border-color: #d97706;
+  color: #ffffff;
+}
+
+.ink-mark-list li[data-flagged='true'] span {
+  color: #92400e;
+}
+
+.ink-flag:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
+}
+
 .ink-preview {
   margin: 0 0 8px;
   padding: 8px;

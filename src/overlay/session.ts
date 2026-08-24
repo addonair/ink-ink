@@ -15,12 +15,12 @@ import type { SiteAdapter } from '@adapters/types';
 import { classifyStroke } from '@core/classify';
 import { resolveStroke } from '@core/resolve';
 import { shouldCapture, StrokeRecorder, type PointerKind } from '@core/stroke';
-import type { Mark, Rect, Stroke, StrokeId, Target, TargetId } from '@core/types';
+import type { Mark, QuestionId, Rect, Stroke, StrokeId, Target, TargetId } from '@core/types';
 import { composeAnswerMessage, DEFAULT_TRAILING_INSTRUCTION } from '@compose/message';
 import { MarkSet } from '@state/marks';
 
 import { InkCanvas } from './ink-canvas';
-import { ReviewPanel } from './review-panel';
+import { ReviewPanel, type QuestionRow } from './review-panel';
 import { InkToggle } from './toggle';
 import overlayCss from './overlay.css?inline';
 
@@ -60,6 +60,16 @@ export class InkSession {
   #measuredAt = 0;
   #scrollRootEl: HTMLElement | null = null;
   #diagnosedSinceEnable = false;
+
+  /**
+   * Questions the user asked to have explained.
+   *
+   * Keyed by question rather than by mark, for two reasons: FR-21 replaces the
+   * mark when an answer changes, and you still do not understand the question;
+   * and a question can be flagged with no mark at all, which is the case this
+   * feature mainly exists for.
+   */
+  readonly #flagged = new Set<QuestionId>();
   readonly #teardown = new AbortController();
 
   /**
@@ -105,6 +115,7 @@ export class InkSession {
     this.#panel = new ReviewPanel({
       container: root,
       onRemoveMark: (id) => this.#removeMark(id),
+      onToggleFlag: (questionId) => this.#toggleFlag(questionId),
       onUndo: () => this.#undo(),
       onSubmit: () => {
         void this.submit().then((outcome) => this.#panel.reportSubmission(outcome));
@@ -130,6 +141,7 @@ export class InkSession {
   previewText(): string {
     return composeAnswerMessage(this.#marks.resolved(), {
       trailingInstruction: this.#trailingInstruction,
+      explainOrdinals: this.#explainOrdinals(),
     });
   }
 
@@ -185,8 +197,9 @@ export class InkSession {
 
   #finishSubmission(): void {
     this.#marks.clear(); // FR-14
+    this.#flagged.clear();
     this.#canvas.clear();
-    this.#panel.update(this.#marks.all());
+    this.#refreshPanel();
     this.#panel.setPreview('');
   }
 
@@ -470,6 +483,10 @@ export class InkSession {
     }
 
     this.#applyEnabled(true);
+
+    // The panel lists questions, not just marks, so it has to populate as soon
+    // as the page has been measured rather than waiting for a first stroke.
+    this.#refreshPanel();
   }
 
   #applyEnabled(enabled: boolean): void {
@@ -517,8 +534,67 @@ export class InkSession {
     this.#refreshPanel();
   }
 
+  /**
+   * Every question on the page, with whatever the user did about it.
+   *
+   * Built from the measured targets rather than from the marks, so a question
+   * nobody answered still gets a row and can be flagged.
+   */
+  #questionRows(): QuestionRow[] {
+    const rows = new Map<QuestionId, QuestionRow>();
+
+    for (const target of this.#targets) {
+      const questionId = target.questionId;
+      if (questionId === undefined || rows.has(questionId)) continue;
+
+      rows.set(questionId, {
+        questionId,
+        ordinal: target.ordinal ?? rows.size + 1,
+        answer: null,
+        strokeId: null,
+        flagged: this.#flagged.has(questionId),
+      });
+    }
+
+    for (const mark of this.#marks.resolved()) {
+      if (mark.resolution.status !== 'resolved') continue;
+      const target = mark.resolution.target;
+      const questionId = target.questionId;
+      if (questionId === undefined) continue;
+
+      const row = rows.get(questionId) ?? {
+        questionId,
+        ordinal: target.ordinal ?? rows.size + 1,
+        answer: null,
+        strokeId: null,
+        flagged: this.#flagged.has(questionId),
+      };
+      row.answer = target.label ?? target.text;
+      row.strokeId = mark.stroke.id;
+      rows.set(questionId, row);
+    }
+
+    return [...rows.values()];
+  }
+
+  /** Ordinals of flagged questions, for the composed request. */
+  #explainOrdinals(): number[] {
+    return this.#questionRows()
+      .filter((row) => row.flagged)
+      .map((row) => row.ordinal);
+  }
+
+  #toggleFlag(questionId: QuestionId): void {
+    if (this.#flagged.has(questionId)) {
+      this.#flagged.delete(questionId);
+    } else {
+      this.#flagged.add(questionId);
+    }
+    this.#refreshPanel();
+  }
+
   #refreshPanel(): void {
-    this.#panel.update(this.#marks.all());
+    this.#panel.update(this.#questionRows(), this.#marks.unresolved());
     this.#panel.setPreview(this.previewText());
   }
 
