@@ -24,6 +24,9 @@ import { ReviewPanel } from './review-panel';
 import { InkToggle } from './toggle';
 import overlayCss from './overlay.css?inline';
 
+/** What happened to the composed text when the user submitted. */
+export type SubmitOutcome = 'inserted' | 'copied' | 'failed';
+
 export interface SessionOptions {
   adapter: SiteAdapter;
   /** Where to mount. Defaults to document.body. */
@@ -102,7 +105,9 @@ export class InkSession {
       container: root,
       onRemoveMark: (id) => this.#removeMark(id),
       onUndo: () => this.#undo(),
-      onSubmit: () => this.submit(),
+      onSubmit: () => {
+        void this.submit().then((outcome) => this.#panel.reportSubmission(outcome));
+      },
       onDismiss: () => this.#panel.hide(),
     });
 
@@ -130,12 +135,20 @@ export class InkSession {
   /**
    * Insert the composed answers into the host composer (FR-26).
    *
-   * Never sends (FR-27, NFR-8). Clears the ink only once insertion succeeded —
-   * losing someone's answers to a failed insert would be the worst outcome here.
+   * Never sends (FR-27, NFR-8).
+   *
+   * Rich text editors — ChatGPT, Claude and Gemini all use one — can accept a
+   * write and quietly discard it, so `insertText` reports whether the text
+   * actually landed. When it did not, the answers go to the clipboard instead.
+   * Losing twenty marks to a failed insert is the worst outcome available here,
+   * and a paste is a cheap price next to re-answering.
+   *
+   * Ink is cleared on `inserted` and `copied`, since the text is in the user's
+   * hands either way, and kept on `failed`.
    */
-  submit(): boolean {
+  async submit(): Promise<SubmitOutcome> {
     const text = this.previewText();
-    if (text === '') return false;
+    if (text === '') return 'failed';
 
     let inserted: boolean;
     try {
@@ -144,16 +157,36 @@ export class InkSession {
       inserted = false;
     }
 
-    if (!inserted) {
-      this.#toggle.setDegraded(true, 'Could not reach the chat box on this page');
-      return false;
+    if (inserted) {
+      this.#finishSubmission();
+      return 'inserted';
     }
 
+    if (await this.#copyToClipboard(text)) {
+      this.#toggle.setDegraded(true, 'Copied your answers — paste them into the chat box');
+      this.#finishSubmission();
+      return 'copied';
+    }
+
+    this.#toggle.setDegraded(true, 'Could not reach the chat box, and copying failed');
+    return 'failed';
+  }
+
+  /** Runs inside the submit click, so it keeps its user-gesture permission. */
+  async #copyToClipboard(text: string): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  #finishSubmission(): void {
     this.#marks.clear(); // FR-14
     this.#canvas.clear();
     this.#panel.update(this.#marks.all());
     this.#panel.setPreview('');
-    return true;
   }
 
   setTrailingInstruction(value: string): void {

@@ -142,6 +142,24 @@ export class ReviewPanel {
     this.#preview.hidden = text === '';
   }
 
+  /**
+   * Say where the text actually went.
+   *
+   * "Copied" is not a failure and must not read like one: the answers are safe,
+   * they just need pasting. Saying nothing would leave someone staring at an
+   * empty chat box wondering whether twenty marks were lost.
+   */
+  reportSubmission(outcome: 'inserted' | 'copied' | 'failed'): void {
+    if (outcome === 'inserted') return;
+
+    this.show();
+    this.#preview.hidden = false;
+    this.#preview.textContent =
+      outcome === 'copied'
+        ? 'Copied to your clipboard — paste it into the chat box, then send.'
+        : 'Could not reach the chat box, and copying failed. Your marks are still here.';
+  }
+
   show(): void {
     this.#root.hidden = false;
   }

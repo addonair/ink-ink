@@ -41,7 +41,10 @@ session. No API keys, no per-token cost, no separate account.
 ### In scope (MVP)
 
 - Chrome/Edge desktop, Manifest V3
-- One supported host site to start (DeepSeek), architected for more
+- Six supported host sites: DeepSeek, ChatGPT, Claude, Gemini, Copilot and
+  Perplexity. Originally scoped as one (DeepSeek) architected for more; the
+  architecture held, and adding a site is now one entry in
+  `src/adapters/sites.ts` — see `.claude/decisions/multi-site-support.md`.
 - Stylus input as primary; finger reserved for scrolling
 - Three mark types: **circle** (enclose an option), **tick** (point at an
   option), and **underline** (run a line along an option). Underline was added

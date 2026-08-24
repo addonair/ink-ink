@@ -1,25 +1,20 @@
 import { defineManifest } from '@crxjs/vite-plugin';
 
 import pkg from './package.json' with { type: 'json' };
+import { matchPatternsFor, SITES } from './src/adapters/sites.ts';
 
 /**
  * Host allowlist (FR-1).
  *
- * MVP ships one host. Adding an entry here without also adding a matching
- * adapter under `src/adapters/` is a no-op: the registry returns null for
- * unknown hosts and the content script stays inert (NFR-9).
+ * Generated from `SITES`, the same list the adapter registry is built from, so
+ * the manifest and the registry cannot disagree. Adding a site is one entry in
+ * `src/adapters/sites.ts`.
  *
- * TODO(verify): confirm these patterns against a live DeepSeek session before
- * the first real release. Spec section 8 flags host markup as the top risk.
+ * Still an explicit allowlist of named domains — never `<all_urls>` — so the
+ * extension only ever loads where it has a reason to (NFR-6). The widening from
+ * one domain to six is recorded in `.claude/decisions/multi-site-support.md`.
  */
-export const HOST_MATCHES = [
-  // Both forms are needed: `*.deepseek.com` does not match the bare domain.
-  // Kept to one company's domain, so this is still a narrow allowlist (NFR-6),
-  // but wide enough that guessing the exact chat subdomain is not a
-  // prerequisite for the extension loading at all.
-  'https://deepseek.com/*',
-  'https://*.deepseek.com/*',
-] as const;
+export const HOST_MATCHES = matchPatternsFor(SITES);
 
 export default defineManifest({
   manifest_version: 3,

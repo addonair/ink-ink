@@ -264,11 +264,11 @@ describe('InkSession', () => {
     expect(session.markCount).toBe(0);
   });
 
-  it('submit() does nothing when no marks are resolved', () => {
+  it('submit() does nothing when no marks are resolved', async () => {
     session = new InkSession({ adapter: fixtureAdapter });
 
     expect(session.previewText()).toBe('');
-    expect(session.submit()).toBe(false);
+    await expect(session.submit()).resolves.toBe('failed');
   });
 
   it('setTrailingInstruction flows into the composed preview (FR-26)', () => {
@@ -281,13 +281,64 @@ describe('InkSession', () => {
     expect(session.previewText()).toBe('');
   });
 
-  it('reports failure and degrades when the composer cannot be reached', () => {
+  it('reports failure and degrades when the composer cannot be reached', async () => {
     session = new InkSession({
       adapter: { ...fixtureAdapter, composer: () => null, insertText: () => false },
     });
 
     // Nothing resolved, so submit short-circuits before touching the adapter.
-    expect(session.submit()).toBe(false);
+    await expect(session.submit()).resolves.toBe('failed');
+  });
+
+  /**
+   * Rich text editors can accept a write and quietly discard it, so a failed
+   * insert must not cost the user their marks. These cover the fallback.
+   */
+  describe('when the composer will not take the text', () => {
+    /** Draw one resolvable mark so there is something to submit. */
+    function drawAnswer(): void {
+      const box = optionBounds(0, 0);
+      sendPen('pointerdown', box.x - 8, box.y - 8);
+      sendPen('pointermove', box.x + box.width + 8, box.y - 8);
+      sendPen('pointermove', box.x + box.width + 8, box.y + box.height + 8);
+      sendPen('pointermove', box.x - 8, box.y + box.height + 8);
+      sendPen('pointerup', box.x - 8, box.y - 8);
+    }
+
+    function stubClipboard(writeText: () => Promise<void>): void {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText },
+        configurable: true,
+      });
+    }
+
+    it('copies to the clipboard and clears, since the text is safe', async () => {
+      const copied: string[] = [];
+      stubClipboard(async (...args: unknown[]) => {
+        copied.push(String(args[0]));
+      });
+
+      session = new InkSession({ adapter: { ...fixtureAdapter, insertText: () => false } });
+      toggle().click();
+      drawAnswer();
+      expect(session.markCount).toBe(1);
+
+      await expect(session.submit()).resolves.toBe('copied');
+      expect(copied[0]).toContain('My answers:');
+      expect(session.markCount).toBe(0);
+    });
+
+    it('keeps the marks when copying also fails', async () => {
+      stubClipboard(() => Promise.reject(new Error('denied')));
+
+      session = new InkSession({ adapter: { ...fixtureAdapter, insertText: () => false } });
+      toggle().click();
+      drawAnswer();
+
+      await expect(session.submit()).resolves.toBe('failed');
+      // Losing answers to a failed submit is the worst outcome available.
+      expect(session.markCount).toBe(1);
+    });
   });
 });
 

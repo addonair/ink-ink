@@ -1,14 +1,18 @@
 /**
  * Adapter lookup (NFR-10).
  *
- * Adding a host site means writing an adapter and adding it to this array plus
- * the manifest's HOST_MATCHES. No core logic changes.
+ * Built from `SITES`, which is the same list the manifest's host allowlist is
+ * generated from. They used to be maintained separately, and adding a host to
+ * one without the other silently did nothing — a chance to get it wrong once
+ * per site. Supporting a new site is now a single entry in `sites.ts`, with no
+ * core logic changes.
  */
 
-import { deepseekAdapter } from './deepseek';
+import { createChatAdapter } from './generic';
+import { SITES } from './sites';
 import type { SiteAdapter } from './types';
 
-const ADAPTERS: readonly SiteAdapter[] = [deepseekAdapter];
+const ADAPTERS: readonly SiteAdapter[] = SITES.map(createChatAdapter);
 
 /**
  * Find the adapter for a location, or null.
