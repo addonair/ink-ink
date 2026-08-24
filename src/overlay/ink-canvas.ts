@@ -108,9 +108,14 @@ export interface InkCanvasOptions {
 }
 
 export class InkCanvas {
-  /** Captures pointer input. Fixed to the viewport; never painted on. */
-  readonly #surface: HTMLDivElement;
-  /** Holds the stroke SVGs. Positioned in the page so it scrolls with content. */
+  /**
+   * Holds the stroke SVGs, positioned in the page so it scrolls with content.
+   *
+   * There is deliberately no input surface. An overlay covering the viewport
+   * swallows the wheel along with the pen, which stops a chat site whose
+   * conversation scrolls in its own container from scrolling at all. Pen input
+   * is captured on the document instead — see InkSession.
+   */
   readonly #layer: HTMLDivElement;
 
   readonly #entries: Entry[] = [];
@@ -125,14 +130,9 @@ export class InkCanvas {
   };
 
   constructor(options: InkCanvasOptions) {
-    const surface = document.createElement('div');
-    surface.className = 'ink-surface';
-
     const layer = document.createElement('div');
     layer.className = 'ink-layer';
-
-    options.container.append(layer, surface);
-    this.#surface = surface;
+    options.container.appendChild(layer);
     this.#layer = layer;
 
     /**
@@ -271,21 +271,10 @@ export class InkCanvas {
     /* positions are page-relative; scrolling needs no work */
   }
 
-  /** Toggle interception without tearing the layer down (FR-2, FR-3). */
-  setEnabled(enabled: boolean): void {
-    this.#surface.style.pointerEvents = enabled ? 'auto' : 'none';
-  }
-
-  /** The element pointer listeners should attach to. */
-  get element(): HTMLElement {
-    return this.#surface;
-  }
-
   destroy(): void {
     this.#observer?.disconnect();
     this.#observer = null;
     window.removeEventListener('resize', this.#onResize);
-    this.#surface.remove();
     this.#layer.remove();
   }
 

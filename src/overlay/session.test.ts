@@ -27,6 +27,28 @@ const shadowOf = (): ShadowRoot => {
   return shadow;
 };
 
+/** Pen input now arrives via a document-level capture listener. */
+const sendPen = (type: string, x: number, y: number, id = 3): boolean =>
+  document.dispatchEvent(
+    new PointerEvent(type, {
+      pointerType: 'pen',
+      pointerId: id,
+      isPrimary: true,
+      bubbles: true,
+      cancelable: true,
+      clientX: x,
+      clientY: y,
+    }),
+  );
+
+const drawSquare = (id = 3): void => {
+  sendPen('pointerdown', 100, 100, id);
+  sendPen('pointermove', 160, 100, id);
+  sendPen('pointermove', 160, 160, id);
+  sendPen('pointermove', 100, 160, id);
+  sendPen('pointerup', 100, 100, id);
+};
+
 const toggle = (): HTMLButtonElement => {
   const el = shadowOf().querySelector<HTMLButtonElement>('.ink-toggle');
   if (el === null) throw new Error('no toggle');
@@ -50,26 +72,53 @@ describe('InkSession', () => {
   it('mounts inside a shadow root so host styles are untouched (NFR-11)', () => {
     session = new InkSession({ adapter: fixtureAdapter });
 
-    expect(shadowOf().querySelector('.ink-surface')).not.toBeNull();
+    expect(shadowOf().querySelector('.ink-layer')).not.toBeNull();
     expect(shadowOf().querySelector('style')?.textContent).toContain('.ink-toggle');
     // Nothing of ours in the light DOM beyond the single host element.
     expect(document.querySelectorAll('.ink-toggle')).toHaveLength(0);
   });
 
-  it('starts with the ink layer off and intercepting nothing (FR-3, FR-4)', () => {
+  it('starts off, and while off records nothing and claims no event (FR-3, FR-4)', () => {
     session = new InkSession({ adapter: fixtureAdapter });
 
     expect(toggle().textContent).toBe('Pen off');
     expect(toggle().getAttribute('aria-pressed')).toBe('false');
-    expect(shadowOf().querySelector<HTMLElement>('.ink-surface')?.style.pointerEvents).toBe('none');
+
+    drawSquare();
+
+    expect(session.markCount).toBe(0);
+    // dispatchEvent returns false only if preventDefault was called, so a true
+    // return proves the page's own handling was left alone.
+    expect(sendPen('pointerdown', 100, 100)).toBe(true);
   });
 
-  it('enables interception only once toggled on (FR-2)', () => {
+  it('records a stroke once toggled on (FR-2)', () => {
     session = new InkSession({ adapter: fixtureAdapter });
     toggle().click();
 
     expect(toggle().textContent).toBe('Pen on');
-    expect(shadowOf().querySelector<HTMLElement>('.ink-surface')?.style.pointerEvents).toBe('auto');
+    drawSquare();
+    expect(session.markCount).toBe(1);
+  });
+
+  it('never claims non-pen events, so the page keeps scrolling (US-8)', () => {
+    // Regression: a full-viewport overlay swallowed the wheel along with the
+    // pen, so a chat scrolling in its own container stopped scrolling entirely
+    // while the pen was on.
+    session = new InkSession({ adapter: fixtureAdapter });
+    toggle().click();
+
+    const wheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 120 });
+    expect(document.dispatchEvent(wheel)).toBe(true);
+
+    const mouse = new PointerEvent('pointerdown', {
+      pointerType: 'touch',
+      pointerId: 9,
+      bubbles: true,
+      cancelable: true,
+    });
+    expect(document.dispatchEvent(mouse)).toBe(true);
+    expect(session.markCount).toBe(0);
   });
 
   it('does not report a healthy page as broken', () => {
@@ -121,27 +170,10 @@ describe('InkSession', () => {
     session = new InkSession({ adapter: fixtureAdapter });
     toggle().click();
 
-    const surface = shadowOf().querySelector<HTMLElement>('.ink-surface');
-    if (surface === null) throw new Error('no input surface');
-
-    const send = (type: string, x: number, y: number): void => {
-      surface.dispatchEvent(
-        new PointerEvent(type, {
-          pointerType: 'pen',
-          pointerId: 3,
-          isPrimary: true,
-          bubbles: true,
-          cancelable: true,
-          clientX: x,
-          clientY: y,
-        }),
-      );
-    };
-
-    send('pointerdown', 100, 100);
-    send('pointermove', 140, 100);
-    send('pointermove', 140, 140);
-    send('pointercancel', 140, 140);
+    sendPen('pointerdown', 100, 100);
+    sendPen('pointermove', 140, 100);
+    sendPen('pointermove', 140, 140);
+    sendPen('pointercancel', 140, 140);
 
     // The stroke survived and became a mark, resolved or not.
     expect(session.markCount).toBe(1);
@@ -152,28 +184,7 @@ describe('InkSession', () => {
     // mechanism as the text, so there is no scroll handler to lag behind.
     session = new InkSession({ adapter: fixtureAdapter });
     toggle().click();
-
-    const surface = shadowOf().querySelector<HTMLElement>('.ink-surface');
-    if (surface === null) throw new Error('no input surface');
-
-    const send = (type: string, x: number, y: number): void => {
-      surface.dispatchEvent(
-        new PointerEvent(type, {
-          pointerType: 'pen',
-          pointerId: 5,
-          isPrimary: true,
-          bubbles: true,
-          cancelable: true,
-          clientX: x,
-          clientY: y,
-        }),
-      );
-    };
-
-    send('pointerdown', 100, 100);
-    send('pointermove', 160, 100);
-    send('pointermove', 160, 160);
-    send('pointerup', 100, 100);
+    drawSquare(5);
 
     const layer = shadowOf().querySelector('.ink-layer');
     expect(layer?.querySelectorAll('svg.ink-stroke').length).toBe(1);

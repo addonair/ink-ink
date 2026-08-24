@@ -35,6 +35,27 @@ const MEASUREMENT_TTL_MS = 500;
 
 const POINTER_KINDS = new Set(['pen', 'touch', 'mouse']);
 
+/**
+ * Describe which element actually scrolls, for diagnosis.
+ *
+ * A chat that scrolls inside its own container rather than the window breaks
+ * assumptions about coordinates, so it is worth knowing which case a site is.
+ */
+function describeScrollParent(el: Element): string {
+  let node: Element | null = el;
+  while (node !== null && node !== document.body) {
+    const style = getComputedStyle(node);
+    const scrolls = /auto|scroll|overlay/.test(style.overflowY);
+    if (scrolls && node.scrollHeight > node.clientHeight + 1) {
+      return `<${node.tagName.toLowerCase()} class="${node.className}"> (inner container)`;
+    }
+    node = node.parentElement;
+  }
+  return document.documentElement.scrollHeight > window.innerHeight + 1
+    ? 'window (page scrolls normally)'
+    : 'none detected';
+}
+
 function pointerKindOf(event: PointerEvent): PointerKind | null {
   return POINTER_KINDS.has(event.pointerType) ? (event.pointerType as PointerKind) : null;
 }
@@ -91,17 +112,11 @@ export class InkSession {
       onDismiss: () => this.#panel.hide(),
     });
 
-    // Set the off state explicitly rather than inheriting it from the
-    // stylesheet. If style injection ever failed, a canvas with the default
-    // `pointer-events: auto` would swallow every click on the host page while
-    // the layer is supposedly off — FR-3 must not depend on CSS loading.
-    this.#canvas.setEnabled(false);
-
     // FR-12: a resize reflows the host page, moving text to entirely different
     // document coordinates. Re-measure and shift the ink to follow it.
     this.#canvas.onReflow(() => this.#handleReflow());
 
-    this.#attachPointerListeners(root);
+    this.#attachPointerListeners();
     this.#checkHealth();
   }
 
@@ -160,50 +175,62 @@ export class InkSession {
 
   // --- pointer handling --------------------------------------------------
 
-  #attachPointerListeners(root: HTMLElement): void {
-    const surface = this.#canvas.element;
+  /**
+   * Listen on the document, in the capture phase, and act only on the pen.
+   *
+   * The overlay used to be a full-viewport element with `pointer-events: auto`,
+   * which meant it swallowed the wheel as well as the pen. On a chat site whose
+   * conversation scrolls inside its own container — not the window — that
+   * container never received the event and the page simply stopped scrolling
+   * while the pen was on.
+   *
+   * Capturing on the document instead lets everything that is not a pen stroke
+   * reach the page untouched: wheel, mouse, touch, clicks. A pen event is
+   * stopped here and never reaches the page, so drawing cannot select text or
+   * press the site's own buttons.
+   */
+  #attachPointerListeners(): void {
+    const opts = { capture: true } as const;
 
-    surface.addEventListener('pointerdown', (event) => {
-      const kind = pointerKindOf(event);
-      if (kind === null || !shouldCapture(kind, this.#enabled)) return;
+    document.addEventListener(
+      'pointerdown',
+      (event) => {
+        if (!this.#shouldDraw(event)) return;
 
-      // Ink drawn while a response is still generating drifts as the content
-      // grows (spec section 8). Refuse rather than record something that will
-      // resolve against stale geometry.
-      if (this.#isStreaming()) return;
+        // Ink drawn while a response is still generating drifts as the content
+        // grows (spec section 8). Refuse rather than record something that will
+        // resolve against stale geometry.
+        if (this.#isStreaming()) return;
 
-      event.preventDefault();
-      this.#activePointerId = event.pointerId;
-      this.#recorder.begin(this.#sample(event));
-      this.#canvas.drawLive(this.#recorder.current);
+        this.#claim(event);
+        this.#activePointerId = event.pointerId;
+        this.#recorder.begin(this.#sample(event));
+        this.#canvas.drawLive(this.#recorder.current);
+      },
+      opts,
+    );
 
-      // Capture keeps the stroke alive if the pen leaves the canvas mid-draw.
-      // It is an enhancement, not a prerequisite: setPointerCapture throws
-      // when the id is no longer an active pointer, and losing the whole
-      // stroke to that would be worse than losing capture. Recording has
-      // already started by this point either way.
-      try {
-        surface.setPointerCapture(event.pointerId);
-      } catch {
-        /* drawing continues without capture */
-      }
-    });
+    document.addEventListener(
+      'pointermove',
+      (event) => {
+        if (event.pointerId !== this.#activePointerId) return;
+        this.#claim(event);
 
-    surface.addEventListener('pointermove', (event) => {
-      if (event.pointerId !== this.#activePointerId) return;
-
-      // Coalesced events recover the samples the browser batched between
-      // frames, which is what keeps a fast stroke smooth (NFR-1).
-      const events =
-        typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : [event];
-      for (const e of events.length > 0 ? events : [event]) {
-        this.#recorder.extend(this.#sample(e));
-      }
-      this.#canvas.drawLive(this.#recorder.current);
-    });
+        // Coalesced events recover the samples the browser batched between
+        // frames, which is what keeps a fast stroke smooth (NFR-1).
+        const events =
+          typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : [event];
+        for (const e of events.length > 0 ? events : [event]) {
+          this.#recorder.extend(this.#sample(e));
+        }
+        this.#canvas.drawLive(this.#recorder.current);
+      },
+      opts,
+    );
 
     const finish = (event: PointerEvent, appendFinalPoint: boolean): void => {
       if (event.pointerId !== this.#activePointerId) return;
+      this.#claim(event);
       this.#activePointerId = null;
 
       const stroke = this.#recorder.end(appendFinalPoint ? this.#sample(event) : undefined);
@@ -211,26 +238,35 @@ export class InkSession {
       if (stroke !== null) this.#handleStroke(stroke);
     };
 
-    surface.addEventListener('pointerup', (e) => finish(e, true));
+    document.addEventListener('pointerup', (e) => finish(e, true), opts);
 
     /**
      * A cancelled pointer keeps its stroke rather than discarding it.
      *
-     * `pointercancel` means the browser took the pointer away mid-gesture. The
-     * earlier behaviour — throw the stroke away — is what made ink stop dead
-     * and vanish partway through a line. Losing work someone deliberately drew
-     * is a far worse failure than keeping a slightly short stroke, and the
-     * classifier already refuses to read a stroke that means nothing.
-     *
-     * The final position is not appended here, because a cancel carries no
-     * meaningful coordinate.
+     * `pointercancel` means the browser took the pointer away mid-gesture.
+     * Discarding the stroke is what made ink stop dead and vanish partway
+     * through a line. Losing work someone deliberately drew is worse than
+     * keeping a slightly short stroke, and the classifier already refuses to
+     * read a stroke that means nothing.
      */
-    surface.addEventListener('pointercancel', (e) => finish(e, false));
+    document.addEventListener('pointercancel', (e) => finish(e, false), opts);
+  }
 
-    // Keep the browser from treating pen drags as text selection or panning.
-    root.addEventListener('contextmenu', (e) => {
-      if (this.#enabled) e.preventDefault();
-    });
+  /** Whether this event is a pen stroke we should capture (FR-5, FR-6, FR-7). */
+  #shouldDraw(event: PointerEvent): boolean {
+    const kind = pointerKindOf(event);
+    return kind !== null && shouldCapture(kind, this.#enabled);
+  }
+
+  /**
+   * Take an event away from the page.
+   *
+   * Only ever called for pen events we are drawing with, so the page keeps
+   * receiving everything else (FR-3).
+   */
+  #claim(event: PointerEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
   }
 
   /** Viewport event to document coordinates (FR-9). */
@@ -312,7 +348,6 @@ export class InkSession {
 
   #setEnabled(enabled: boolean): void {
     this.#enabled = enabled;
-    this.#canvas.setEnabled(enabled);
 
     const root = this.#shadow.querySelector<HTMLElement>('.ink-root');
     if (root !== null) root.dataset['enabled'] = String(enabled);
@@ -322,6 +357,7 @@ export class InkSession {
       this.#measuredAt = 0;
       this.#targetsNow();
       this.#checkHealth();
+      this.#logDiagnosis();
     }
   }
 
@@ -373,6 +409,46 @@ export class InkSession {
    * markup change — and is distinguishable from a page that simply has no quiz
    * on it, which finds no messages either.
    */
+  /**
+   * Report what the adapter actually found, to the page console.
+   *
+   * Exists because "nothing resolves" on a real site is unfixable from the
+   * outside: the markup is behind a login, so the only way to learn its shape
+   * is to have the extension describe what it sees. Logged locally only —
+   * nothing is transmitted anywhere (NFR-5).
+   */
+  #logDiagnosis(): void {
+    try {
+      const messages = this.#adapter.assistantMessages();
+      const targets = this.#targetsNow();
+
+      const lines: string[] = [
+        `adapter: ${this.#adapter.id}`,
+        `assistant messages found: ${messages.length}`,
+        `option targets parsed: ${targets.length}`,
+      ];
+
+      const first = messages[messages.length - 1];
+      if (first !== undefined) {
+        const text = (first.textContent ?? '').replace(/\s+/g, ' ').trim();
+        lines.push(
+          `last message tag: <${first.tagName.toLowerCase()} class="${first.className}">`,
+          `last message text (300 chars): ${text.slice(0, 300)}`,
+          `child tags: ${[...first.children].map((c) => c.tagName.toLowerCase()).join(', ')}`,
+        );
+
+        // The single most useful thing for repairing the parser.
+        lines.push('last message HTML (1200 chars):', first.innerHTML.slice(0, 1200));
+      }
+
+      lines.push(`scroll container: ${describeScrollParent(messages[0] ?? document.body)}`);
+
+      console.warn(`[ink-ink] diagnosis\n${lines.join('\n')}`);
+    } catch (error) {
+      console.warn('[ink-ink] diagnosis failed', error);
+    }
+  }
+
   #checkHealth(): void {
     let messages: number;
     try {
