@@ -1,43 +1,183 @@
 /**
  * DeepSeek adapter — the MVP's single supported host.
  *
- * SCAFFOLD. Every selector below is a placeholder and is expected to be wrong
- * until verified against a live session. They are collected in one exported
- * object so that repairing the adapter is an exercise in editing a table, not
- * in hunting through logic (NFR-10).
+ * Strategy: try known selectors first, then fall back to structure.
  *
- * Deliberate choice: the stubs return empty/false rather than throwing, so an
- * unverified adapter leaves the extension inert instead of breaking the page
- * (NFR-9).
+ * The selectors below are **unverified** and expected to break; spec section 8
+ * calls host markup breakage a question of when, not if. So they are only a
+ * fast path. When every one of them misses, `assistantMessages()` falls back to
+ * finding message containers by shape, which survives a class-name change
+ * entirely. That is the difference between the extension going dead on a
+ * redesign and merely getting slower.
+ *
+ * All parsing lives in `mcq-parser.ts` and is site-independent. Only container
+ * discovery, the composer, and streaming detection are DeepSeek's business.
  */
 
+import { parseMcqTargets, parseOptionLabel } from './mcq-parser';
+import type { SiteAdapter } from './types';
 import type { Target } from '@core/types';
 
-import type { SiteAdapter } from './types';
+export { OPTION_PATTERNS } from './mcq-parser';
 
 /**
- * TODO(verify): confirm all of these against a real DeepSeek session before
- * the first release. Spec section 8 lists DOM fragility as the top risk.
+ * Fast-path selectors for an assistant turn.
+ *
+ * TODO(verify): confirm against a live DeepSeek session. Ordered most to least
+ * specific; the first that yields anything wins.
  */
-export const SELECTORS = {
-  /** Container for a single assistant turn. */
-  assistantMessage: '[data-message-author-role="assistant"]',
-  /** Element present only while a response is generating. */
-  streamingIndicator: '[data-streaming="true"]',
-  /** The message composer input. */
-  composer: 'textarea, [contenteditable="true"]',
-} as const;
-
-/**
- * Option-label patterns to try, in order (spec section 8: "Option parsing").
- * Each must capture the label in group 1 and the option text in group 2.
- */
-export const OPTION_PATTERNS: readonly RegExp[] = [
-  /^\s*\(([A-Za-z])\)\s+(.*)$/, //  (A) Paris
-  /^\s*([A-Za-z])\)\s+(.*)$/, //    A) Paris
-  /^\s*([A-Za-z])\.\s+(.*)$/, //    A. Paris
-  /^\s*([A-Za-z])\s*[:-]\s+(.*)$/, // A: Paris  /  A - Paris
+export const MESSAGE_SELECTORS: readonly string[] = [
+  '[data-message-author-role="assistant"]',
+  '[data-role="assistant"]',
+  '[class*="ds-markdown"]',
+  '[class*="markdown-body"]',
+  '[class*="message-content"]',
 ];
+
+/** Composer candidates. Semantic rather than cosmetic, so relatively stable. */
+export const COMPOSER_SELECTORS: readonly string[] = [
+  'textarea#chat-input',
+  'textarea[placeholder]',
+  'div[contenteditable="true"]',
+  '[role="textbox"]',
+  'textarea',
+];
+
+/** Minimum option lines before a container counts as an assistant message. */
+const MIN_OPTIONS_FOR_FALLBACK = 2;
+
+/**
+ * Whether an element is an editable host for text.
+ *
+ * The `isContentEditable` property alone is not enough: it is unimplemented in
+ * some environments, and the attribute is what the page actually declares.
+ * Checking both means the composer is found either way.
+ */
+function isContentEditable(el: HTMLElement): boolean {
+  if (el.isContentEditable) return true;
+  const attr = el.getAttribute('contenteditable');
+  return attr === '' || attr === 'true' || attr === 'plaintext-only';
+}
+
+/**
+ * Whether an element is a usable target.
+ *
+ * Deliberately NOT `offsetParent !== null`: that is null for every
+ * `position: fixed` element, and chat composers are very often fixed — the
+ * check would reject exactly the element it is meant to find.
+ */
+function isUsable(el: HTMLElement): boolean {
+  if (el.hidden) return false;
+
+  const style = el.ownerDocument.defaultView?.getComputedStyle(el);
+  if (style === undefined) return true;
+
+  return style.display !== 'none' && style.visibility !== 'hidden';
+}
+
+function queryAll(selector: string): HTMLElement[] {
+  try {
+    return [...document.querySelectorAll<HTMLElement>(selector)];
+  } catch {
+    // An invalid selector must not take the adapter down (NFR-9).
+    return [];
+  }
+}
+
+/**
+ * Structural fallback: find containers that look like rendered assistant
+ * markdown, without relying on any class name.
+ *
+ * Walks up from option-looking lines to the nearest ancestor holding several
+ * of them, then keeps only the outermost such ancestors.
+ */
+function messagesByStructure(): HTMLElement[] {
+  const candidates = new Map<HTMLElement, number>();
+
+  for (const el of document.querySelectorAll<HTMLElement>('li, p, div')) {
+    const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+    if (text === '' || parseOptionLabel(text) === null) continue;
+
+    // Never treat the composer's own contents as a message.
+    if (el.closest('textarea, input, [contenteditable="true"]') !== null) continue;
+
+    const container = el.closest<HTMLElement>('article, section, div');
+    if (container === null) continue;
+    candidates.set(container, (candidates.get(container) ?? 0) + 1);
+  }
+
+  const qualifying = [...candidates.entries()]
+    .filter(([, count]) => count >= MIN_OPTIONS_FOR_FALLBACK)
+    .map(([el]) => el);
+
+  // Drop any container nested inside another qualifying one, so a question
+  // block does not get reported separately from the message that holds it.
+  return qualifying.filter((el) => !qualifying.some((other) => other !== el && other.contains(el)));
+}
+
+/**
+ * Streaming detection without a selector (spec section 8).
+ *
+ * A response that is still generating mutates its own subtree continuously.
+ * Watching for that is site-independent and survives any redesign, where a
+ * "is generating" class name would not.
+ */
+class StreamWatcher {
+  #lastMutation = 0;
+  #observer: MutationObserver | null = null;
+
+  /** Quiet period after the last mutation before a response counts as settled. */
+  static readonly QUIET_MS = 600;
+
+  start(): void {
+    if (this.#observer !== null) return;
+    // Guarded so importing this module outside a browser (a worker, a node
+    // test) cannot throw. An adapter that explodes on import would take the
+    // whole content script with it.
+    if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return;
+    if (document.body === null) return;
+
+    this.#observer = new MutationObserver(() => {
+      this.#lastMutation = Date.now();
+    });
+    this.#observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  }
+
+  get streaming(): boolean {
+    if (this.#lastMutation === 0) return false;
+    return Date.now() - this.#lastMutation < StreamWatcher.QUIET_MS;
+  }
+
+  stop(): void {
+    this.#observer?.disconnect();
+    this.#observer = null;
+  }
+}
+
+const watcher = new StreamWatcher();
+
+/**
+ * Set a value on a framework-controlled field.
+ *
+ * React (and friends) install their own value setter and ignore direct
+ * assignment, so the native prototype setter has to be called explicitly before
+ * the `input` event will be believed.
+ */
+function setControlledValue(el: HTMLTextAreaElement | HTMLInputElement, text: string): void {
+  const proto =
+    el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+
+  if (setter === undefined) {
+    el.value = text;
+  } else {
+    setter.call(el, text);
+  }
+}
 
 export const deepseekAdapter: SiteAdapter = {
   id: 'deepseek',
@@ -48,37 +188,72 @@ export const deepseekAdapter: SiteAdapter = {
   },
 
   assistantMessages(): HTMLElement[] {
-    // SCAFFOLD: returns nothing, so the extension stays inert (NFR-9).
-    return [];
+    watcher.start();
+
+    for (const selector of MESSAGE_SELECTORS) {
+      const found = queryAll(selector);
+      if (found.length > 0) return found;
+    }
+
+    // Every known selector missed — the markup has probably changed. Fall back
+    // to shape rather than going dead (NFR-9).
+    return messagesByStructure();
   },
 
-  parseTargets(_message: HTMLElement): Target[] {
-    // SCAFFOLD. The real implementation must:
-    //   1. walk the message for question blocks and their option lines
-    //   2. match each line against OPTION_PATTERNS
-    //   3. measure bounds in DOCUMENT coordinates (FR-9, FR-16) —
-    //      getBoundingClientRect() + window.scrollX/scrollY
-    //   4. link each option to its question via questionId, so FR-21's
-    //      replace-previous-answer behaviour has a key to group on
-    return [];
+  parseTargets(message: HTMLElement): Target[] {
+    try {
+      return parseMcqTargets(message, { idPrefix: 'deepseek' });
+    } catch {
+      return [];
+    }
   },
 
   isStreaming(): boolean {
-    // SCAFFOLD: false is the safe default — it permits inking. Once the real
-    // signal is wired, streaming should suppress ink (spec section 8).
-    return false;
+    return watcher.streaming;
   },
 
   composer(): HTMLElement | null {
+    for (const selector of COMPOSER_SELECTORS) {
+      const el = queryAll(selector).find(isUsable);
+      if (el !== undefined) return el;
+    }
     return null;
   },
 
-  insertText(_text: string): boolean {
-    // SCAFFOLD. The real implementation sets the composer value and dispatches
-    // an `input` event so the site's framework registers the change.
-    //
-    // It MUST NOT dispatch Enter or click the send button — FR-27 and NFR-8
-    // require the user to send. This is the project's ToS line.
-    return false;
+  /**
+   * Insert into the composer (FR-26).
+   *
+   * MUST NOT submit. No Enter is dispatched and no send button is clicked —
+   * FR-27 and NFR-8 both rest on the user sending it themselves, and that is
+   * the line this project holds on terms of service.
+   */
+  insertText(text: string): boolean {
+    const el = this.composer();
+    if (el === null) return false;
+
+    try {
+      el.focus();
+
+      if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+        setControlledValue(el, text);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      }
+
+      if (isContentEditable(el)) {
+        el.textContent = text;
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text }));
+        return true;
+      }
+
+      return false;
+    } catch {
+      return false;
+    }
   },
 };
+
+/** Test seam: stop the mutation observer between cases. */
+export function __stopStreamWatcher(): void {
+  watcher.stop();
+}

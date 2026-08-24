@@ -1,3 +1,8 @@
+// @vitest-environment jsdom
+// A SiteAdapter is a DOM object by definition — it reads the host page. Testing
+// the registry without a document would assert a situation a content script
+// can never be in.
+
 import { describe, expect, it } from 'vitest';
 
 import { adapterFor, allAdapters } from './registry';
@@ -56,11 +61,10 @@ describe('adapter contract', () => {
   });
 });
 
+// Behavioural coverage for the DeepSeek adapter lives in ./deepseek.test.ts,
+// which needs a DOM. The one thing left open is verification against the real
+// site, which no test can substitute for:
 describe('deepseek adapter', () => {
-  it.todo('finds assistant message roots in real markup');
-  it.todo('parses "A)" / "A." / "(A)" / list-item option formats');
-  it.todo('reports bounds in document coordinates, not viewport (FR-9)');
-  it.todo('groups options under their question via questionId (FR-21)');
-  it.todo('detects the streaming state');
-  it.todo('inserts text into the composer without sending (FR-26, FR-27)');
+  it.todo('VERIFY: MESSAGE_SELECTORS match a live chat.deepseek.com session');
+  it.todo('VERIFY: COMPOSER_SELECTORS match the live composer');
 });

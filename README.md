@@ -46,16 +46,17 @@ on the content script; `npm run build` produces a production bundle.
 
 ## Scripts
 
-| Command             | What it does                                          |
-| ------------------- | ----------------------------------------------------- |
-| `npm run dev`       | Vite dev server with HMR on the content script        |
-| `npm run build`     | Production bundle into `dist/`                        |
-| `npm run zip`       | Build, then package `dist/` into `release/`           |
-| `npm run typecheck` | `tsc --noEmit`                                        |
-| `npm run lint`      | ESLint, including the architectural boundary rules    |
-| `npm test`          | Vitest                                                |
-| `npm run icons`     | Regenerate placeholder icons (stdlib Python, no deps) |
-| `npm run validate`  | Check the `.claude/` knowledge base for stale entries |
+| Command             | What it does                                                                  |
+| ------------------- | ----------------------------------------------------------------------------- |
+| `npm run dev`       | Vite dev server with HMR on the content script                                |
+| `npm run demo`      | Standalone demo page at localhost:5174 — draw with a pen, no extension needed |
+| `npm run build`     | Production bundle into `dist/`                                                |
+| `npm run zip`       | Build, then package `dist/` into `release/`                                   |
+| `npm run typecheck` | `tsc --noEmit`                                                                |
+| `npm run lint`      | ESLint, including the architectural boundary rules                            |
+| `npm test`          | Vitest                                                                        |
+| `npm run icons`     | Regenerate placeholder icons (stdlib Python, no deps)                         |
+| `npm run validate`  | Check the `.claude/` knowledge base for stale entries                         |
 
 ## Layout
 
