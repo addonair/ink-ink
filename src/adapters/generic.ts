@@ -26,21 +26,50 @@ import type { Target } from '@core/types';
 export const COMMON_MESSAGE_SELECTORS: readonly string[] = [
   '[data-message-author-role="assistant"]',
   '[data-role="assistant"]',
-  '[data-testid*="assistant" i]',
-  '[class*="markdown-body"]',
   '[class*="ds-markdown"]',
+  '[class*="markdown-body"]',
+  '[class*="message-content"]',
+  // Broad, so it goes last: it can match avatars and toolbars as easily as
+  // messages, and an earlier position let it displace a working selector.
+  '[data-testid*="assistant" i]',
 ];
 
 /** Composer candidates tried on every site, semantic first. */
 export const COMMON_COMPOSER_SELECTORS: readonly string[] = [
+  'textarea[placeholder]',
   'div[contenteditable="true"]',
   '[role="textbox"]',
-  'textarea[placeholder]',
   'textarea',
 ];
 
 /** Minimum option lines before a container counts as an assistant message. */
 const MIN_OPTIONS_FOR_FALLBACK = 2;
+
+/**
+ * Keep only the outermost elements, dropping any contained by another.
+ *
+ * Real chat markup nests a message several layers deep, so one selector often
+ * matches both a wrapper and its inner content. Parsing both yields the same
+ * options twice, and two targets with identical bounds score identically —
+ * which the resolver correctly reports as ambiguous, so every mark comes back
+ * unresolved.
+ *
+ * The structural path always did this; the selector path did not, and that
+ * asymmetry is what broke DeepSeek. One helper now serves both so they cannot
+ * diverge again.
+ */
+function outermost(elements: readonly HTMLElement[]): HTMLElement[] {
+  return elements.filter((el) => !elements.some((other) => other !== el && other.contains(el)));
+}
+
+/** Whether this element contains anything that reads as an option line. */
+function holdsOptions(el: HTMLElement): boolean {
+  for (const child of el.querySelectorAll('li, p, div, span')) {
+    const text = (child.textContent ?? '').replace(/\s+/g, ' ').trim();
+    if (text !== '' && parseOptionLabel(text) !== null) return true;
+  }
+  return false;
+}
 
 /**
  * Whether an element is an editable host for text.
@@ -102,8 +131,7 @@ function messagesByStructure(): HTMLElement[] {
     .filter(([, count]) => count >= MIN_OPTIONS_FOR_FALLBACK)
     .map(([el]) => el);
 
-  // Drop any container nested inside another qualifying one.
-  return qualifying.filter((el) => !qualifying.some((other) => other !== el && other.contains(el)));
+  return outermost(qualifying);
 }
 
 /**
@@ -228,17 +256,37 @@ export function createChatAdapter(site: SiteConfig): SiteAdapter {
       return siteMatchesHost(site, url.hostname);
     },
 
+    /**
+     * Find the assistant turns, preferring ones that actually hold questions.
+     *
+     * A selector used to win merely by matching something, which let a broad
+     * selector displace a working one and silently disable the structural
+     * fallback. Now a selector wins only if what it matched contains
+     * option-looking text; otherwise the search continues.
+     *
+     * Order of preference:
+     *   1. a selector whose matches hold options
+     *   2. the structural scan
+     *   3. whatever matched at all — so a page with messages but no parseable
+     *      options is still distinguishable from a page with no messages, which
+     *      is what the health check reports on.
+     */
     assistantMessages(): HTMLElement[] {
       watcher.start();
 
+      let matchedAnything: HTMLElement[] | null = null;
+
       for (const selector of messageSelectors) {
-        const found = queryAll(selector);
-        if (found.length > 0) return found;
+        const found = outermost(queryAll(selector));
+        if (found.length === 0) continue;
+        if (found.some(holdsOptions)) return found;
+        matchedAnything ??= found;
       }
 
-      // Every known selector missed — the markup has probably changed, or this
-      // site was never given any. Fall back to shape rather than going dead.
-      return messagesByStructure();
+      const structural = messagesByStructure();
+      if (structural.length > 0) return structural;
+
+      return matchedAnything ?? [];
     },
 
     parseTargets(message: HTMLElement, scrollOffset: ScrollOffset): Target[] {

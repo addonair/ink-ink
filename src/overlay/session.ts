@@ -59,6 +59,7 @@ export class InkSession {
   #targets: Target[] = [];
   #measuredAt = 0;
   #scrollRootEl: HTMLElement | null = null;
+  #diagnosedSinceEnable = false;
   readonly #teardown = new AbortController();
 
   /**
@@ -382,6 +383,15 @@ export class InkSession {
 
     this.#canvas.setMarkState(mark);
     this.#refreshPanel();
+
+    // A mark that will not resolve is the case most needing explanation, and
+    // the diagnosis used to fire only when the health check failed — so in the
+    // exact situation where targets are found but nothing resolves, there was
+    // no output at all. Logged once per enable rather than per stroke.
+    if (mark.resolution.status === 'unresolved' && !this.#diagnosedSinceEnable) {
+      this.#diagnosedSinceEnable = true;
+      this.#logDiagnosis();
+    }
   }
 
   /**
@@ -442,6 +452,8 @@ export class InkSession {
       this.#applyEnabled(false);
       return;
     }
+
+    this.#diagnosedSinceEnable = false;
 
     // Measure on activation so the first stroke is not the one paying for it.
     this.#refreshScrollRoot();
@@ -547,6 +559,28 @@ export class InkSession {
 
         // The single most useful thing for repairing the parser.
         lines.push('last message HTML (1200 chars):', first.innerHTML.slice(0, 1200));
+      }
+
+      const boxes = targets
+        .slice(0, 6)
+        .map(
+          (t) =>
+            `${t.ordinal ?? '?'}${t.label ?? '?'} @ ${Math.round(t.bounds.x)},${Math.round(
+              t.bounds.y,
+            )} ${Math.round(t.bounds.width)}x${Math.round(t.bounds.height)}`,
+        );
+      lines.push(`first targets: ${boxes.join(' | ')}`);
+
+      // Two targets sharing a box score identically, which the resolver
+      // reports as ambiguous — the signature of a message parsed twice.
+      const seen = new Set(
+        targets.map((t) => `${t.bounds.x},${t.bounds.y},${t.bounds.width},${t.bounds.height}`),
+      );
+      if (seen.size < targets.length) {
+        lines.push(
+          `WARNING: ${targets.length - seen.size} targets share a box with another — ` +
+            'a message is being parsed more than once, which makes every mark ambiguous.',
+        );
       }
 
       lines.push(`scroll container: ${describeScrollRoot(this.#scrollRootEl)}`);

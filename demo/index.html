@@ -124,57 +124,66 @@
         to the text. Nothing is sent anywhere — <kbd>Send</kbd> below only echoes what was inserted.
       </div>
 
+      <!--
+        Deliberately nested: the outer turn and the inner content BOTH carry
+        data-role="assistant", which is what real chat markup does. A selector
+        then matches at two levels, and parsing both yields every option twice.
+        Duplicated targets score identically and every mark comes back
+        unresolved — the exact regression that reached the user because the demo
+        used to have a single flat container.
+      -->
       <div class="bubble" data-role="assistant">
         <h2>Assistant</h2>
+        <div data-role="assistant">
+          <div data-question="1">
+            <p>1. What is the capital of France?</p>
+            <ul>
+              <li>A) Berlin</li>
+              <li>B) Paris</li>
+              <li>C) Madrid</li>
+              <li>D) Lisbon</li>
+            </ul>
+          </div>
 
-        <div data-question="1">
-          <p>1. What is the capital of France?</p>
-          <ul>
-            <li>A) Berlin</li>
-            <li>B) Paris</li>
-            <li>C) Madrid</li>
-            <li>D) Lisbon</li>
-          </ul>
-        </div>
+          <div data-question="2">
+            <p>2. Which planet is closest to the Sun?</p>
+            <ul>
+              <li>A. Venus</li>
+              <li>B. Mercury</li>
+              <li>C. Mars</li>
+              <li>D. Jupiter</li>
+            </ul>
+          </div>
 
-        <div data-question="2">
-          <p>2. Which planet is closest to the Sun?</p>
-          <ul>
-            <li>A. Venus</li>
-            <li>B. Mercury</li>
-            <li>C. Mars</li>
-            <li>D. Jupiter</li>
-          </ul>
-        </div>
+          <div data-question="3">
+            <p>3. What is 7 × 8?</p>
+            <ul>
+              <li>(A) 54</li>
+              <li>(B) 56</li>
+              <li>(C) 64</li>
+              <li>(D) 48</li>
+            </ul>
+          </div>
 
-        <div data-question="3">
-          <p>3. What is 7 × 8?</p>
-          <ul>
-            <li>(A) 54</li>
-            <li>(B) 56</li>
-            <li>(C) 64</li>
-            <li>(D) 48</li>
-          </ul>
-        </div>
+          <div data-question="4">
+            <p>4. Who wrote <em>Things Fall Apart</em>?</p>
+            <ul>
+              <li>A - Wole Soyinka</li>
+              <li>B - Chinua Achebe</li>
+              <li>C - Ngũgĩ wa Thiong'o</li>
+              <li>D - Ayi Kwei Armah</li>
+            </ul>
+          </div>
 
-        <div data-question="4">
-          <p>4. Who wrote <em>Things Fall Apart</em>?</p>
-          <ul>
-            <li>A - Wole Soyinka</li>
-            <li>B - Chinua Achebe</li>
-            <li>C - Ngũgĩ wa Thiong'o</li>
-            <li>D - Ayi Kwei Armah</li>
-          </ul>
-        </div>
-
-        <div data-question="5">
-          <p>5. What is the chemical symbol for gold?</p>
-          <ul>
-            <li>A) Ag</li>
-            <li>B) Gd</li>
-            <li>C) Au</li>
-            <li>D) Go</li>
-          </ul>
+          <div data-question="5">
+            <p>5. What is the chemical symbol for gold?</p>
+            <ul>
+              <li>A) Ag</li>
+              <li>B) Gd</li>
+              <li>C) Au</li>
+              <li>D) Go</li>
+            </ul>
+          </div>
         </div>
       </div>
     </main>

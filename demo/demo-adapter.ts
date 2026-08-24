@@ -1,60 +1,30 @@
 /**
- * A `SiteAdapter` over the demo page's own markup.
+ * The demo's adapter — the real one, with only the host check replaced.
  *
- * Deliberately delegates to the same `parseMcqTargets` the DeepSeek adapter
- * uses, rather than parsing the demo's markup specially. That way drawing on
- * the demo in a real browser exercises the real parser and the real
- * viewport → document coordinate conversion — if the structural parser were
- * broken, the demo would show it.
+ * This used to re-implement message discovery, and it immediately proved why
+ * that is a bad idea: when the demo markup was changed to nest an assistant
+ * turn the way real chat sites do, production code handled it and the demo's
+ * copy did not, so the demo failed on a bug that was already fixed. A second
+ * implementation of the same thing is a second thing to get wrong.
  *
- * Not registered in `src/adapters/registry.ts`; only the demo entry point
- * imports it, so it never reaches the extension bundle.
+ * Building on `createChatAdapter` means drawing on the demo exercises the code
+ * that actually ships: the same message discovery, de-nesting, MCQ parsing,
+ * scroll-root detection, composer discovery and insertion.
  */
 
-import { parseMcqTargets } from '@adapters/mcq-parser';
-import { findScrollRoot, type ScrollOffset } from '@adapters/scroll';
+import { createChatAdapter } from '@adapters/generic';
 import type { SiteAdapter } from '@adapters/types';
-import type { Target } from '@core/types';
 
-export const demoAdapter: SiteAdapter = {
+const base = createChatAdapter({
   id: 'demo',
   label: 'Demo page',
+  // The demo is served from localhost, so the host check is overridden below
+  // rather than pretending this is a real site.
+  domains: ['localhost'],
+  composerSelectors: ['#composer'],
+});
 
-  matches(): boolean {
-    return true;
-  },
-
-  assistantMessages(): HTMLElement[] {
-    return [...document.querySelectorAll<HTMLElement>('[data-role="assistant"]')];
-  },
-
-  parseTargets(message: HTMLElement, scrollOffset: ScrollOffset): Target[] {
-    return parseMcqTargets(message, { idPrefix: 'demo', scrollOffset });
-  },
-
-  /**
-   * Detected rather than hard-coded, so the demo behaves like a real site
-   * whether its messages sit in the page or inside a scrolling container.
-   */
-  scrollRoot(): HTMLElement | null {
-    return findScrollRoot(this.assistantMessages()[0] ?? null);
-  },
-
-  isStreaming(): boolean {
-    return document.body.hasAttribute('data-streaming');
-  },
-
-  composer(): HTMLElement | null {
-    return document.querySelector<HTMLElement>('#composer');
-  },
-
-  insertText(text: string): boolean {
-    const el = this.composer() as HTMLTextAreaElement | null;
-    if (el === null) return false;
-
-    el.value = text;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.focus();
-    return true;
-  },
+export const demoAdapter: SiteAdapter = {
+  ...base,
+  matches: (): boolean => true,
 };
