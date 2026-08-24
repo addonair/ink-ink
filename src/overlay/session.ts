@@ -14,7 +14,7 @@ import type { SiteAdapter } from '@adapters/types';
 import { classifyStroke } from '@core/classify';
 import { resolveStroke } from '@core/resolve';
 import { shouldCapture, StrokeRecorder, type PointerKind } from '@core/stroke';
-import type { Mark, Stroke, StrokeId, Target } from '@core/types';
+import type { Mark, Rect, Stroke, StrokeId, Target, TargetId } from '@core/types';
 import { composeAnswerMessage, DEFAULT_TRAILING_INSTRUCTION } from '@compose/message';
 import { MarkSet } from '@state/marks';
 
@@ -96,6 +96,10 @@ export class InkSession {
     // `pointer-events: auto` would swallow every click on the host page while
     // the layer is supposedly off — FR-3 must not depend on CSS loading.
     this.#canvas.setEnabled(false);
+
+    // FR-12: a resize reflows the host page, moving text to entirely different
+    // document coordinates. Re-measure and shift the ink to follow it.
+    this.#canvas.onReflow(() => this.#handleReflow());
 
     this.#attachPointerListeners(root);
     this.#checkHealth();
@@ -330,6 +334,30 @@ export class InkSession {
   #undo(): void {
     const undone = this.#marks.undo(); // FR-25
     if (undone !== null) this.#canvas.erase(undone.stroke.id);
+    this.#refreshPanel();
+  }
+
+  /**
+   * Re-anchor ink and prune marks after the page reflowed (FR-12).
+   *
+   * Ink that can no longer be placed is dropped by the canvas; the mark set has
+   * to drop those marks too, or the review panel would list answers with no
+   * visible ink behind them.
+   */
+  #handleReflow(): void {
+    this.#measuredAt = 0;
+    const targets = this.#targetsNow();
+
+    const byId = new Map<TargetId, Rect>();
+    for (const t of targets) byId.set(t.id, t.bounds);
+
+    this.#canvas.reflow(byId);
+
+    const surviving = new Set(this.#canvas.strokeIds());
+    for (const mark of this.#marks.all()) {
+      if (!surviving.has(mark.stroke.id)) this.#marks.remove(mark.stroke.id);
+    }
+
     this.#refreshPanel();
   }
 

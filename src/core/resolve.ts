@@ -8,10 +8,13 @@
 import {
   boundingBox,
   centroid,
-  coverageOf,
+  clamp01,
   distanceToRect,
   pointInPolygon,
+  pointInRect,
+  rectArea,
   rectCenter,
+  rectIntersectionArea,
 } from './geometry';
 import type { MarkKind, Resolution, Stroke, Target } from './types';
 
@@ -79,15 +82,44 @@ export function scoreByEnclosure(stroke: Stroke, targets: readonly Target[]): Sc
   const region = boundingBox(stroke.points);
   if (region === null) return [];
 
+  const centre = centroid(stroke.points);
+  const regionArea = rectArea(region);
+
   return targets
     .map((target) => {
-      const coverage = coverageOf(target.bounds, region);
-      if (coverage === 0) return { target, score: 0 };
+      const overlap = rectIntersectionArea(target.bounds, region);
+      if (overlap === 0) return { target, score: 0 };
 
-      // Bounding-box overlap is necessary but not sufficient — check the
-      // target's centre against the actual path.
-      const enclosed = pointInPolygon(rectCenter(target.bounds), stroke.points);
-      return { target, score: enclosed ? coverage : coverage * OUTSIDE_PATH_PENALTY };
+      /**
+       * Two readings of "this stroke went round that option", scored together.
+       *
+       * `ofTarget` is the fraction of the option covered — right when someone
+       * loops the whole line. `ofStroke` is the fraction of the stroke that
+       * landed inside the option — right when someone circles just the word.
+       *
+       * The second reading is the one that matters in practice, and leaving it
+       * out is what made real marks fail. A rendered `<li>` spans the full
+       * content width, so a tight circle around "Paris" covered about 5% of the
+       * line box and scored 0.05 against a 0.45 threshold. Taking the better of
+       * the two readings scores that same stroke near 1.
+       */
+      const ofTarget = overlap / Math.max(rectArea(target.bounds), 1);
+      const ofStroke = regionArea > 0 ? overlap / regionArea : 0;
+      const raw = clamp01(Math.max(ofTarget, ofStroke));
+
+      /**
+       * Guard against scoring a box the stroke merely sits near.
+       *
+       * Anchored means either the stroke's own centre is inside the option, or
+       * the option's centre is inside the drawn path. Checking only the latter
+       * fails for a word-sized circle on a full-width line, because the line's
+       * centre is far off to the right of the loop.
+       */
+      const anchored =
+        (centre !== null && pointInRect(centre, target.bounds)) ||
+        pointInPolygon(rectCenter(target.bounds), stroke.points);
+
+      return { target, score: anchored ? raw : raw * OUTSIDE_PATH_PENALTY };
     })
     .sort(byScoreDescending);
 }

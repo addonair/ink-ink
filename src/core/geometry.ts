@@ -141,6 +141,11 @@ export function pointInPolygon(p: Vec2, polygon: readonly Vec2[]): boolean {
   return inside;
 }
 
+/** Whether a point lies within a rect, edges included. */
+export function pointInRect(p: Vec2, r: Rect): boolean {
+  return p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height;
+}
+
 /** Shortest distance from a point to a rect; 0 when inside. Backs FR-18. */
 export function distanceToRect(p: Vec2, r: Rect): number {
   const dx = Math.max(r.x - p.x, 0, p.x - (r.x + r.width));

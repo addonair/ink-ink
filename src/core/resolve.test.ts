@@ -83,6 +83,30 @@ describe('scoreByEnclosure (FR-17)', () => {
     expect(scoreByEnclosure(stroke([]), ALL)).toEqual([]);
   });
 
+  it('resolves a circle drawn around only the word, on a full-width option line', () => {
+    // The failure reported from the field. A rendered <li> spans the whole
+    // content width, but people circle the word, not the line box. Scoring only
+    // "fraction of the option covered" gave 0.05 against a 0.45 threshold, so
+    // most real marks came back "not clearly over an option".
+    const wide: Target = option('b', 'B', { x: 100, y: 200, width: 600, height: 24 });
+    const roundTheWord = stroke([
+      [120, 196],
+      [200, 196],
+      [200, 228],
+      [120, 228],
+      [120, 196],
+    ]);
+
+    const [top] = scoreByEnclosure(roundTheWord, [wide]);
+    expect(top?.score).toBeGreaterThan(MIN_CONFIDENCE);
+    expect(resolveStroke(roundTheWord, 'circle', [wide]).status).toBe('resolved');
+  });
+
+  it('still ranks the enclosed option first when the line is circled whole', () => {
+    const s = stroke(loopAround(100, 130, 200, 20));
+    expect(scoreByEnclosure(s, ALL)[0]?.target.label).toBe('B');
+  });
+
   it('penalises a target inside the bounding box but outside the stroke path', () => {
     // A tall narrow loop drawn to the left of the options: its bounding box
     // clips them, but it never went around them. Without the penalty this
@@ -167,18 +191,23 @@ describe('resolveStroke', () => {
   });
 
   it('uses enclosure scoring for circles and proximity scoring for ticks', () => {
-    // A tick placed on C resolves to C; the same points read as a "circle"
-    // enclose nothing and fail. Different strategies, different outcomes.
-    const onC = stroke([
-      [150, 168],
-      [156, 176],
-      [168, 162],
+    // A mark just to the right of every option box. It overlaps nothing, so
+    // enclosure scores it zero — but it sits close to C, so proximity ranks C
+    // first. That disagreement is the whole point of having two strategies.
+    const beside = stroke([
+      [320, 168],
+      [326, 176],
+      [332, 164],
     ]);
-    const asTick = resolveStroke(onC, 'tick', ALL);
-    expect(asTick.status).toBe('resolved');
-    expect(asTick.status === 'resolved' && asTick.target.label).toBe('C');
 
-    expect(resolveStroke(onC, 'circle', ALL).status).toBe('unresolved');
+    expect(scoreByEnclosure(beside, ALL).every((s) => s.score === 0)).toBe(true);
+
+    const nearest = scoreByProximity(beside, ALL)[0];
+    expect(nearest?.target.label).toBe('C');
+    expect(nearest?.score).toBeGreaterThan(0);
+
+    // A circle that encloses nothing is not a guess waiting to happen (FR-19).
+    expect(resolveStroke(beside, 'circle', ALL).status).toBe('unresolved');
   });
 
   it('ignores target kinds outside acceptKinds', () => {
